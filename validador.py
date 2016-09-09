@@ -79,31 +79,27 @@ def clean(s):
     return " ".join(s.strip().lower().split())
 
 def comparaSalida(user, out):
-    hayDiferencias = False
     lineasUser = [ clean(l) for l in user.split("\n") if l.strip()!="" ]
     lineasOut  = [ clean(l) for l in out.split("\n") if l.strip()!="" ]
 
     longitud = min(len(lineasUser), len(lineasOut))
     for i in range(longitud):
         if lineasUser[i] != lineasOut[i]:
-            hayDiferencias = True
-            break
-    if hayDiferencias:
-        return True, lineasUser[i], lineasOut[i]
+            return True, lineasUser[i], lineasOut[i]
+
+    if len(lineasUser) == len(lineasOut):
+        return False, None, None
+    elif len(lineasUser) > longitud:
+        return True, "\n".join(lineasUser[longitud:]), None
     else:
-        if len(lineasUser) == len(lineasOut):
-            return False, None, None
-        elif len(lineasUser) > longitud:
-            return True, "\n".join(lineasUser[longitud:]), None
-        else:
-            return True, None, "\n".join(lineasOut[longitud:])
+        return True, None, "\n".join(lineasOut[longitud:])
 
 def matriz(datos):
     lineas=datos.split('\n')
     mat=[]
     for l in lineas:
         if l=="": break
-        mat.append(list(map(int,l.split())))
+        mat.append([int(n) for n in l.split()])
     return mat
 
 def compararMatrices(user, out):
@@ -136,7 +132,7 @@ def posDiferencia(cad1, cad2):
             return i
     return len(cad1)
 
-def checkOutput(filename, inp, out, image, res):
+def checkOutput(filename, inp, out, image, res, conf):
     user = res.decode('utf8').strip()
     if len(inp)>0 and inp[-1]=="\n":
         entrada = inp[:-1].split("\n")
@@ -201,14 +197,10 @@ def do_test(filename, inp, out, image, check_function, conf):
     if check_function:
         if check_function_output(filename):
             return False
-    return checkOutput(filename, inp, out, image, res)
+    return checkOutput(filename, inp, out, image, res, conf)
 
 def validacion(conf):
-    global not_implemented_exercices, not_implemented_mandatory_exercices
-    global not_valid_exercices, not_valid_mandatory_exercices
-    global todas_las_pruebas_superadas, todas_las_obligatorias_superadas
-    global to_be_zipped
-
+    resultado = Resultado()
     for element in conf.work:
         if len(element) == 3:
             (filename, is_mandatory, tests) = element
@@ -216,15 +208,9 @@ def validacion(conf):
             (filename, tests) = element
             is_mandatory = True
         if is_mandatory:
-            to_be_zipped.append(filename)
+            resultado.add_to_zip(filename)
         if not os.path.isfile(filename) or os.stat(filename).st_size == 0:
-            not_implemented_exercices.append(filename)
-            not_valid_exercices.append(filename)
-            todas_las_pruebas_superadas = False
-            if is_mandatory:
-                not_valid_mandatory_exercices.append(filename)
-                not_implemented_mandatory_exercices.append(filename)
-                todas_las_obligatorias_superadas = False
+            resultado.add_not_implemented(filename, is_mandatory)
             continue
         if tests == []:
             print("{0} no tiene pruebas (compruébalo manualmente)".format(filename))
@@ -249,11 +235,8 @@ def validacion(conf):
         if isOk:
             print("{0} pasa las pruebas".format(filename))
         else:
-            not_valid_exercices.append(filename)
-            todas_las_pruebas_superadas = False
-            if is_mandatory:
-                not_valid_mandatory_exercices.append(filename)
-                todas_las_obligatorias_superadas = False
+            resultado.add_not_valid(filename, is_mandatory)
+    return resultado
 
 def get_desktop_folder():
     from os import path
@@ -263,21 +246,35 @@ def get_desktop_folder():
         return desktop
     return home
 
+class Resultado:
+    def __init__(self):
+        self.not_implemented_exercices = []
+        self.not_implemented_mandatory_exercices = []
+        self.not_valid_exercices = []
+        self.not_valid_mandatory_exercices = []
+        self.todas_las_pruebas_superadas = True
+        self.todas_las_obligatorias_superadas = True
+        self.to_be_zipped = []
 
-if version_info < (3, 1):
-    error("El validador sólo funciona sobre Python 3.1 o superior")
+    def add_to_zip(self, name):
+        self.to_be_zipped.append(name)
 
+    def add_not_implemented(self, name, mandatory):
+        self.not_implemented_exercices.append(name)
+        if mandatory:
+            self.not_implemented_mandatory_exercices.append(name)
+        self.add_not_valid(name, mandatory)
 
-not_implemented_exercices = []
-not_implemented_mandatory_exercices = []
-not_valid_exercices = []
-not_valid_mandatory_exercices = []
-todas_las_pruebas_superadas = True
-todas_las_obligatorias_superadas = True
-to_be_zipped = []
+    def add_not_valid(self, name, mandatory):
+        self.not_valid_exercices.append(name)
+        self.todas_las_pruebas_superadas = False
+        if mandatory:
+            self.not_valid_mandatory_exercices.append(name)
+            self.todas_las_obligatorias_superadas = False
+
 
 class Configuración:
-    fields = [("VERSION", "1.2.9"),
+    fields = [("VERSION", "1.3.01"),
               ("TIMEOUT", 5), #seconds
               ("RESULTDIR", "resultados/"),
               ("IMAGEFILENAME", ".imagen.txt"),
@@ -342,26 +339,18 @@ def main():
     print("-"*ll)
 
     os.environ['__VALIDADORACTIVATED'] = 'True' 
-    validacion(conf)
-    # efecto en globales:
-    #   not_implemented_exercices
-    #   not_implemented_mandatory_exercices
-    #   not_valid_exercices
-    #   not_valid_mandatory_exercices
-    #   todas_las_pruebas_superadas
-    #   todas_las_obligatorias_superadas
-    #   to_be_zipped
+    resultado = validacion(conf)
 
     # Muestra la lista de ejercicios vacíos o que no existe el fichero
-    num_not_implemented = len(not_implemented_exercices)
+    num_not_implemented = len(resultado.not_implemented_exercices)
     if num_not_implemented>0:
-        num_mandatory_nie = len(not_implemented_mandatory_exercices)
+        num_mandatory_nie = len(resultado.not_implemented_mandatory_exercices)
         num_optional_nie = num_not_implemented - num_mandatory_nie
         print("\nEJERCICIOS NO IMPLEMENTADOS (total: {0}): ".format(num_not_implemented), end="")
         if num_mandatory_nie==0:
             print("todos opcionales\n")
         else:
-            print("{}{}\n".format(' '.join(str(f) for f in not_implemented_mandatory_exercices),
+            print("{}{}\n".format(' '.join(str(f) for f in resultado.not_implemented_mandatory_exercices),
                                     " (y opcionales: {})".format(num_optional_nie) if num_optional_nie>0 else ""))
 
     print("<VALIDACIÓN FINALIZADA>")  
@@ -370,16 +359,16 @@ def main():
     # Muestra el resultado final y, si corresponde, genera zip de entrega
     print('-'*20)
     print()
-    if todas_las_obligatorias_superadas or len(not_valid_mandatory_exercices)<= conf.NUM_MAX_EJERCICIOS_MAL:
-        if todas_las_pruebas_superadas:
+    if resultado.todas_las_obligatorias_superadas or len(resultado.not_valid_mandatory_exercices)<= conf.NUM_MAX_EJERCICIOS_MAL:
+        if resultado.todas_las_pruebas_superadas:
             print("RESULTADO FINAL: VALIDACIÓN COMPLETAMENTE SUPERADA")
-        elif todas_las_obligatorias_superadas:
+        elif resultado.todas_las_obligatorias_superadas:
             print("RESULTADO FINAL: VALIDACIÓN SUPERADA POR OBLIGATORIAS")
-        elif len(not_valid_mandatory_exercices)==1:
-            print("RESULTADO FINAL: VALIDACIÓN SUPERADA POR OBLIGATORIAS, TOLERANDO 1 ejercicio ({0}) que NO supera las pruebas".format(','.join(not_valid_mandatory_exercices)))
+        elif len(resultado.not_valid_mandatory_exercices)==1:
+            print("RESULTADO FINAL: VALIDACIÓN SUPERADA POR OBLIGATORIAS, TOLERANDO 1 ejercicio ({0}) que NO supera las pruebas".format(','.join(resultado.not_valid_mandatory_exercices)))
         else:
-            print("RESULTADO FINAL: VALIDACIÓN SUPERADA POR OBLIGATORIAS, TOLERANDO {0} ejercicios ({1}) que NO superan las pruebas".format(len(not_valid_mandatory_exercices),
-                                                                                                                                            ','.join(not_valid_mandatory_exercices)))
+            print("RESULTADO FINAL: VALIDACIÓN SUPERADA POR OBLIGATORIAS, TOLERANDO {0} ejercicios ({1}) que NO superan las pruebas".format(len(resultado.not_valid_mandatory_exercices),
+                                                                                                                                            ','.join(resultado.not_valid_mandatory_exercices)))
         if conf.CREATE_ZIP:
             print("   GENERANDO ZIP DE ENTREGA...")
 
@@ -388,10 +377,10 @@ def main():
             filename = carpeta_destino+"/"+ZIP_ENTREGA
             zf = zipfile.ZipFile(filename, mode='w')
             try:
-                for ejfname in to_be_zipped:
+                for ejfname in resultado.to_be_zipped:
                     if not os.path.isfile(ejfname):
                         print("\t\t->ERROR: el fichero '{0}' no existe. Para que el zip se genere, DEBES crearlo, aunque esté vacío.".format(ejfname))
-                for ejfname in to_be_zipped:
+                for ejfname in resultado.to_be_zipped:
                     zf.write(ejfname)
                 print("   ...ZIP DE ENTREGA GENERADO EN:")
                 print("\n\t{0}".format(filename))
@@ -405,4 +394,6 @@ def main():
     print('-'*20)
 
 if __name__ == "__main__":
+    if version_info < (3, 1):
+        error("El validador sólo funciona sobre Python 3.1 o superior")
     main()
