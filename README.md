@@ -1,4 +1,4 @@
-# verifica
+# validador
 Program for checking the exercises of the students.
 
 + Currently in the process of rewriting the code.
