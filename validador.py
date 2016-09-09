@@ -188,16 +188,14 @@ def check_function_output_for_exception(filename):
             print("\t",l)
         return True
 
-def test_with_timeout(filename, inp, out, image, check_function, conf):
+def do_test(filename, inp, out, image, check_function, conf):
     programa = [executable, conf.VALIDADOR_FUNCIONES, filename] if check_function else [executable, filename]
     try:
-        res = subprocess.check_output(programa, stdin=open('.fin'), timeout=TIMEOUT)   
-
-#IGNORA EL ERROR DE LA SIGUIENTE LÍNEA SI USAS UNA VERSIÓN DE PYHTON3 INFERIOR A LA 3.3
-    except subprocess.TimeoutExpired:
-        print("{0} TIMEOUT para entrada {1}".format(filename, inp.split()))
-        return False
-    except Exception:
+        res = subprocess.check_output(programa, stdin=open('.fin'), timeout=TIMEOUT)
+    except Exception as e:
+        if version_info >= (3, 3) and isinstance(e, subprocess.TimeoutExpired):
+            print("{0} TIMEOUT para entrada {1}".format(filename, inp.split()))
+            return False
         print("{0} FALLO para entrada {1}. Lanzada excepción:".format(filename, inp.split()))
         if check_function: check_function_output_for_exception(filename)
         return False
@@ -205,22 +203,6 @@ def test_with_timeout(filename, inp, out, image, check_function, conf):
         if check_function_output(filename):
             return False
     return checkOutput(filename, inp, out, image, res)
-
-def test_without_timeout(filename, inp, out, image, check_function, conf):
-    programa = [executable, conf.VALIDADOR_FUNCIONES, filename] if check_function else [executable, filename]
-    try:
-        res = subprocess.check_output(programa, stdin=open('.fin')) 
-    except Exception:
-        print("{0} FALLO para entrada {1}. Lanzada excepción:".format(filename, inp.split()))
-        if check_function: check_function_output_for_exception(filename)
-        return False
-    if check_function:
-        if check_function_output(filename):
-            return False
-    return checkOutput(filename, inp, out, image, res)
-
-# TIMEOUT requires python 3.3 o sup
-do_test = test_without_timeout if version_info < (3, 3) else test_with_timeout
 
 def validacion(conf):
     global not_implemented_exercices, not_implemented_mandatory_exercices
@@ -260,16 +242,16 @@ def validacion(conf):
                 print("Formato de pruebas no válido para {0}".format(filename))
                 isOk = False
                 break
-            with codecs.open(".fin", "w", "utf8") as in_file: 
+            with codecs.open(".fin", "w", "utf8") as in_file:
                 in_file.write(inp)
             isOk = do_test(filename, inp, out, image, pos==0 and conf.VALIDADOR_FUNCIONES!="", conf)
             if not isOk:
-                break  
+                break
         if isOk:
             print("{0} pasa las pruebas".format(filename))
         else:
-            not_valid_exercices.append(filename) 
-            todas_las_pruebas_superadas = False 
+            not_valid_exercices.append(filename)
+            todas_las_pruebas_superadas = False
             if is_mandatory:
                 not_valid_mandatory_exercices.append(filename)
                 todas_las_obligatorias_superadas = False
