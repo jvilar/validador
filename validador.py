@@ -75,7 +75,6 @@ def error(m):
     print("ERROR:", m)
     sys.exit()
 
-
 def clean(s):
     return " ".join(s.strip().lower().split())
 
@@ -83,7 +82,7 @@ def comparaSalida(user, out):
     hayDiferencias = False
     lineasUser = [ clean(l) for l in user.split("\n") if l.strip()!="" ]
     lineasOut  = [ clean(l) for l in out.split("\n") if l.strip()!="" ]
-    
+
     longitud = min(len(lineasUser), len(lineasOut))
     for i in range(longitud):
         if lineasUser[i] != lineasOut[i]:
@@ -117,17 +116,17 @@ def compararMatrices(user, out):
             if user[fila][col] != out[fila][col]:
                 return True, (fila, col, out[fila][col], user[fila][col])
     return False, None
-     
-def comprobarFichero(image):
-    resfilename = RESULTDIR + image
+
+def comprobarFichero(conf, image):
+    resfilename = conf.RESULTDIR + image
     with open(resfilename) as f:
-        user = matriz(f.read()) 
+        user = matriz(f.read())
     try:
-        with open(IMAGEFILENAME) as f:
+        with open(conf.IMAGEFILENAME) as f:
             out = matriz(f.read())
     except Exception:
         return True, None
-    return compararMatrices(user, out)    
+    return compararMatrices(user, out)
 
 def posDiferencia(cad1, cad2):
     if len(cad1) > len(cad2):
@@ -158,10 +157,10 @@ def checkOutput(filename, inp, out, image, res):
         else:
             print("El programa ha generado más líneas de las esperadas. Sobran las siguientes líneas: ")
             print(encontrado)
-            print()    
+            print()
     ficherosDistintos = False
     if image != None:
-        ficherosDistintos,  posicion = comprobarFichero(image)
+        ficherosDistintos,  posicion = comprobarFichero(image, conf)
         if ficherosDistintos:
             if posicion == None:
                 print("{0} FALLO para entrada {1}. Las dimensiones de la imagen resultado no coinciden con las esperadas".format(filename, entrada))
@@ -191,7 +190,7 @@ def check_function_output_for_exception(filename):
 def do_test(filename, inp, out, image, check_function, conf):
     programa = [executable, conf.VALIDADOR_FUNCIONES, filename] if check_function else [executable, filename]
     try:
-        res = subprocess.check_output(programa, stdin=open('.fin'), timeout=TIMEOUT)
+        res = subprocess.check_output(programa, stdin=open('.fin'), timeout=conf.TIMEOUT)
     except Exception as e:
         if version_info >= (3, 3) and isinstance(e, subprocess.TimeoutExpired):
             print("{0} TIMEOUT para entrada {1}".format(filename, inp.split()))
@@ -257,7 +256,7 @@ def validacion(conf):
                 todas_las_obligatorias_superadas = False
 
 def get_desktop_folder():
-    from os import path 
+    from os import path
     desktop = path.expanduser("~/Desktop")
     home = path.expanduser("~")
     if path.isdir(desktop):
@@ -269,13 +268,6 @@ if version_info < (3, 1):
     error("El validador sólo funciona sobre Python 3.1 o superior")
 
 
-VERSION = "1.2.9"
-TIMEOUT = 5 # seconds
-RESULTDIR = "resultados/"
-IMAGEFILENAME = ".imagen.txt"
-MANDATORY = True
-OPTIONAL = False
-
 not_implemented_exercices = []
 not_implemented_mandatory_exercices = []
 not_valid_exercices = []
@@ -285,14 +277,22 @@ todas_las_obligatorias_superadas = True
 to_be_zipped = []
 
 class Configuración:
+    fields = [("VERSION", "1.2.9"),
+              ("TIMEOUT", 5), #seconds
+              ("RESULTDIR", "resultados/"),
+              ("IMAGEFILENAME", ".imagen.txt"),
+              ("NUM_PRACTICA", -1),
+              ("work", []),
+              ("CREATE_ZIP", True),
+              ("VALIDADOR_FUNCIONES", ""),
+              ("NUM_MAX_EJERCICIOS_MAL", 0) # de los obligatorios
+              ]
+
     def __init__(self, variables):
         self.variables = variables
-        self.asigna("NUM_PRACTICA", -1)
-        self.asigna("work", [])
-        self.asigna("CREATE_ZIP", True)
-        self.asigna("VALIDADOR_FUNCIONES", "")
-        self.asigna("NUM_MAX_EJERCICIOS_MAL", 0) # de los obligatorios
-    
+        for (nombre, valor) in Configuración.fields:
+            self.asigna(nombre, valor)
+
     def asigna(self, nombre, valor):
         setattr(self, nombre, self.variables.get(nombre, valor))
 
@@ -311,7 +311,9 @@ def lee_configuración():
     except Exception as e:
         error("Fichero '{0}' no encontrado o no pudo abrirse".format(conf_file))
 
-    variables = {}
+    variables = { "MANDATORY": True, # Usadas para marcar los ficheros
+                  "OPTIONAL": False
+            }
     # aplica (ejecuta) la coonfiguración
     try:
         exec(conf, variables)
@@ -329,7 +331,7 @@ def main():
     conf = lee_configuración()
     # lanza la validación
     msg1 = "VALIDANDO PRÁCTICA {0}".format(conf.NUM_PRACTICA)
-    msg2 = "VALIDADOR v{0}".format(VERSION)
+    msg2 = "VALIDADOR v{0}".format(conf.VERSION)
     msg3 = "[ejecutándose en Python {0}.{1}.{2}]".format(version_info.major, version_info.minor, version_info.micro)
     ll = max(len(msg1),len(msg2),len(msg3))
     print("-"*ll)
