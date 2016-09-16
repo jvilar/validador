@@ -1,9 +1,13 @@
 '''
 Created on 16/07/2014
 
-@version 1.2.10 (2016-09-06)
+@version 1.3.0 (2016-09-16)
 @author: David Llorens (dllorens@uji.es)
+         Federico Prat (fpart@uji.es)
+         Juan Miguel Vilar (jvilar@uji.es)
 
+1.3.0 - Reestructuración del código y cambio en el modo de funcionamiento para que
+        pueda validar sólo un ejercicio.
 1.2.10- Antes se llamaba a check_function_output_for_exception sin comprobar si
         se estaban validando funciones o no.
         Eliminados avisos de Eclipse por sangrado inesperado.
@@ -199,44 +203,45 @@ def do_test(filename, inp, out, image, check_function, conf):
             return False
     return checkOutput(filename, inp, out, image, res, conf)
 
+def esta_implementado(fichero):
+    return os.path.isfile(fichero) and os.stat(fichero).st_size > 0
+
 def validacion(conf):
     resultado = Resultado()
-    for element in conf.work:
-        if len(element) == 3:
-            (filename, is_mandatory, tests) = element
-        else:
-            (filename, tests) = element
-            is_mandatory = True
-        if is_mandatory:
-            resultado.add_to_zip(filename)
-        if not os.path.isfile(filename) or os.stat(filename).st_size == 0:
-            resultado.add_not_implemented(filename, is_mandatory)
-            continue
-        if tests == []:
-            print("{0} no tiene pruebas (compruébalo manualmente)".format(filename))
-            continue
-        isOk = True
-        for pos in range(len(tests)):
-            data = tests[pos]
-            if len(data) == 2:
-                inp, out = data
-                image = None
-            elif len(data) == 3:
-                inp, out, image = data
-            else:
-                print("Formato de pruebas no válido para {0}".format(filename))
-                isOk = False
-                break
-            with codecs.open(".fin", "w", "utf8") as in_file:
-                in_file.write(inp)
-            isOk = do_test(filename, inp, out, image, pos==0 and conf.VALIDADOR_FUNCIONES!="", conf)
-            if not isOk:
-                break
-        if isOk:
-            print("{0} pasa las pruebas".format(filename))
-        else:
-            resultado.add_not_valid(filename, is_mandatory)
+    for ejercicio in conf.ejercicios:
+        prueba_ejercicio(conf, ejercicio, resultado)
     return resultado
+
+def prueba_ejercicio(conf, ejercicio, resultado):
+    filename = ejercicio.nombre
+    if ejercicio.obligatorio:
+        resultado.add_to_zip(filename)
+    if not esta_implementado(filename):
+        resultado.add_not_implemented(filename, ejercicio.obligatorio)
+        return
+    if ejercicio.pruebas == []:
+        print("{0} no tiene pruebas (compruébalo manualmente)".format(filename))
+        return
+    isOk = True
+    for pos, data in enumerate(ejercicio.pruebas):
+        if len(data) == 2:
+            inp, out = data
+            image = None
+        elif len(data) == 3:
+            inp, out, image = data
+        else:
+            print("Formato de pruebas no válido para {0}".format(filename))
+            isOk = False
+            break
+        with codecs.open(".fin", "w", "utf8") as in_file:
+            in_file.write(inp)
+        isOk = do_test(filename, inp, out, image, pos==0 and conf.VALIDADOR_FUNCIONES!="", conf)
+        if not isOk:
+            break
+    if isOk:
+        print("{0} pasa las pruebas".format(filename))
+    else:
+        resultado.add_not_valid(filename, ejercicio.obligatorio)
 
 def get_desktop_folder():
     from os import path
@@ -274,7 +279,7 @@ class Resultado:
 
 
 class Configuración:
-    fields = [("VERSION", "1.3.01"),
+    fields = [("VERSION", "1.3.0"),
               ("TIMEOUT", 5), #seconds
               ("RESULTDIR", "resultados/"),
               ("IMAGEFILENAME", ".imagen.txt"),
@@ -291,12 +296,22 @@ class Configuración:
             self.asigna(nombre, valor)
 
     def asigna(self, nombre, valor):
-        setattr(self, nombre, self.variables.get(nombre, valor))
+        v = self.variables.get(nombre, valor)
+        if nombre != "work":
+            setattr(self, nombre, v)
+        else:
+            self.ejercicios = [ Ejercicio(e) for e in v ]
+
+class Ejercicio:
+    def __init__(self, entrada):
+        self.nombre = entrada[0]
+        self.pruebas = entrada[-1]
+        self.obligatorio = len(entrada) == 2 or entrada[1]
 
 def lee_configuración():
     # busca el fichero de configuración del validador
     matching_files = glob.glob('./validador_prac[0-9].cfg')
-    if len(matching_files)==0:
+    if len(matching_files) == 0:
         error("Falta el fichero de configuración del validador (validador_prac<num>.cfg). Copia a este directorio el que corresponda a esta práctica")
     elif len(matching_files)>1:
         error("Hay más de un fichero de configuración del validador (validador_prac<num>.cfg) en el directorio. Deja sólo el adecuado para esta práctica.")
@@ -320,13 +335,31 @@ def lee_configuración():
     conf = Configuración(variables)
 
     # comprueba 'work'
-    if len(conf.work)==0:
+    if len(conf.ejercicios)==0:
         error ("El fichero de configuración '{0}' no tiene ninguna prueba.".format(matching_files[0]))
     return conf
 
-def main():
-    conf = lee_configuración()
-    # lanza la validación
+def crea_zip(conf, resultado):
+    print("   GENERANDO ZIP DE ENTREGA...")
+
+    ZIP_ENTREGA = "entrega_prac{0}.zip".format(conf.NUM_PRACTICA)
+    carpeta_destino = get_desktop_folder()
+    filename = carpeta_destino+"/"+ZIP_ENTREGA
+    zf = zipfile.ZipFile(filename, mode='w')
+    try:
+        for ejfname in resultado.to_be_zipped:
+            if not os.path.isfile(ejfname):
+                print("\t\t->ERROR: el fichero '{0}' no existe. Para que el zip se genere, DEBES crearlo, aunque esté vacío.".format(ejfname))
+        for ejfname in resultado.to_be_zipped:
+            zf.write(ejfname)
+        print("   ...ZIP DE ENTREGA GENERADO EN:")
+        print("\n\t{0}".format(filename))
+    except:
+        print("...ERROR validador: No se pudo generar el zip de entrega.")
+    finally:
+        zf.close()
+
+def cabecera(conf):
     msg1 = "VALIDANDO PRÁCTICA {0}".format(conf.NUM_PRACTICA)
     msg2 = "VALIDADOR v{0}".format(conf.VERSION)
     msg3 = "[ejecutándose en Python {0}.{1}.{2}]".format(version_info.major, version_info.minor, version_info.micro)
@@ -338,28 +371,71 @@ def main():
     print(msg3)
     print("-"*ll)
 
-    os.environ['__VALIDADORACTIVATED'] = 'True' 
+
+def pendientes():
+    while True:
+        print("""Opciones:
+    + Pulsa INTRO para validar todo y generar el fichero de entrega.
+    + Introduce un nombre de fichero para validarlo (p.ej. ej03.py)
+    + Introduce un número de fichero sin .py para validarlo con .py (p.ej. ej03 para validar ej03.py)
+    + Introduce un número para validar ese ejercicio (p.ej. 3 para validar ej03.py)
+    + Introduce x para salir sin hacer nada.
+    """)
+        opción = input("¿Qué eliges? ")
+        if opción == "":
+            return []
+        elif opción == "x":
+            sys.exit()
+        else:
+            if opción.startswith("ej"):
+                if opción.endswith(".py"):
+                    nombre = opción
+                else:
+                    nombre = opción + ".py"
+            else:
+                try:
+                    n = int(opción)
+                except ValueError:
+                    print("Creo que has escrito mal el nombre del ejercicio, prueba otra vez")
+                    continue
+                nombre = "ej{:02}.py".format(n)
+            if not esta_implementado(nombre):
+                print ("El ejercicio {} no está implementado, prueba otra opción.".format(nombre))
+            else:
+                return [nombre]
+
+def valida_uno(conf, nombre):
+    print("\nProbando:")
+    os.environ['__VALIDADORACTIVATED'] = 'True'
+    resultado = Resultado()
+    for ejercicio in conf.ejercicios:
+        if ejercicio.nombre == nombre:
+            prueba_ejercicio(conf, ejercicio, resultado)
+            return
+
+def valida_todos(conf):
+    os.environ['__VALIDADORACTIVATED'] = 'True'
     resultado = validacion(conf)
 
     # Muestra la lista de ejercicios vacíos o que no existe el fichero
     num_not_implemented = len(resultado.not_implemented_exercices)
-    if num_not_implemented>0:
+    if num_not_implemented > 0:
         num_mandatory_nie = len(resultado.not_implemented_mandatory_exercices)
         num_optional_nie = num_not_implemented - num_mandatory_nie
         print("\nEJERCICIOS NO IMPLEMENTADOS (total: {0}): ".format(num_not_implemented), end="")
-        if num_mandatory_nie==0:
+        if num_mandatory_nie == 0:
             print("todos opcionales\n")
         else:
             print("{}{}\n".format(' '.join(str(f) for f in resultado.not_implemented_mandatory_exercices),
-                                    " (y opcionales: {})".format(num_optional_nie) if num_optional_nie>0 else ""))
+                  " (y opcionales: {})".format(num_optional_nie) if num_optional_nie > 0 else ""))
 
-    print("<VALIDACIÓN FINALIZADA>")  
+    print("<VALIDACIÓN FINALIZADA>")
     print()
 
     # Muestra el resultado final y, si corresponde, genera zip de entrega
     print('-'*20)
     print()
-    if resultado.todas_las_obligatorias_superadas or len(resultado.not_valid_mandatory_exercices)<= conf.NUM_MAX_EJERCICIOS_MAL:
+    if resultado.todas_las_obligatorias_superadas or len(resultado.not_valid_mandatory_exercices) <= conf.NUM_MAX_EJERCICIOS_MAL:
         if resultado.todas_las_pruebas_superadas:
             print("RESULTADO FINAL: VALIDACIÓN COMPLETAMENTE SUPERADA")
         elif resultado.todas_las_obligatorias_superadas:
@@ -370,28 +446,21 @@ def main():
             print("RESULTADO FINAL: VALIDACIÓN SUPERADA POR OBLIGATORIAS, TOLERANDO {0} ejercicios ({1}) que NO superan las pruebas".format(len(resultado.not_valid_mandatory_exercices),
                                                                                                                                             ','.join(resultado.not_valid_mandatory_exercices)))
         if conf.CREATE_ZIP:
-            print("   GENERANDO ZIP DE ENTREGA...")
-
-            ZIP_ENTREGA = "entrega_prac{0}.zip".format(conf.NUM_PRACTICA)
-            carpeta_destino = get_desktop_folder()
-            filename = carpeta_destino+"/"+ZIP_ENTREGA
-            zf = zipfile.ZipFile(filename, mode='w')
-            try:
-                for ejfname in resultado.to_be_zipped:
-                    if not os.path.isfile(ejfname):
-                        print("\t\t->ERROR: el fichero '{0}' no existe. Para que el zip se genere, DEBES crearlo, aunque esté vacío.".format(ejfname))
-                for ejfname in resultado.to_be_zipped:
-                    zf.write(ejfname)
-                print("   ...ZIP DE ENTREGA GENERADO EN:")
-                print("\n\t{0}".format(filename))
-            except:
-                print("...ERROR validador: No se pudo generar el zip de entrega.")
-            finally:
-                zf.close() 
+            crea_zip(conf, resultado)
     else:
         print("RESULTADO FINAL: VALIDACIÓN NO SUPERADA")
     print()
     print('-'*20)
+
+def main():
+    conf = lee_configuración()
+    # lanza la validación
+    cabecera(conf)
+    p = pendientes()
+    if p == []:
+        valida_todos(conf)
+    else:
+        valida_uno(conf, p[0])
 
 if __name__ == "__main__":
     if version_info < (3, 1):
