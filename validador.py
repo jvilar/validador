@@ -190,7 +190,10 @@ def check_function_output_for_exception(filename):
 def do_test(filename, inp, out, image, check_function, conf):
     programa = [executable, conf.VALIDADOR_FUNCIONES, filename] if check_function else [executable, filename]
     try:
-        res = subprocess.check_output(programa, stdin=open('.fin'), timeout=conf.TIMEOUT)
+        if version_info >= (3, 3):
+            res = subprocess.check_output(programa, stdin=open('.fin'), timeout=conf.TIMEOUT)
+        else:
+            res = subprocess.check_output(programa, stdin=open('.fin'))
     except Exception as e:
         if version_info >= (3, 3) and isinstance(e, subprocess.TimeoutExpired):
             print("{0} TIMEOUT para entrada {1}".format(filename, inp.split()))
