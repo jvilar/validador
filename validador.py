@@ -66,13 +66,14 @@ Esto permite que programas mal construidos (p.e. con bucles infinitos) no bloque
 propio comprobador.
 '''
 
+import codecs
+import glob
 import os
-import subprocess
-import zipfile
 from sys import version_info, executable
 import sys
-import glob
-import codecs
+import traceback
+import subprocess
+import zipfile
 
 
 def error(m):
@@ -173,7 +174,7 @@ def do_test(filename, prueba, conf):
     programa = [executable, filename]
     try:
         if version_info >= (3, 3):
-            res = subprocess.check_output(programa, stdin=open(conf.INPUT_FILE), timeout=conf.TIMEOUT)
+            res = subprocess.check_output(programa, stdin=open(conf.INPUT_FILE), stderr = open(conf.ERROR_FILE, "w"), timeout=conf.TIMEOUT)
         else:
             res = subprocess.check_output(programa, stdin=open(conf.INPUT_FILE))
     except Exception as e:
@@ -181,8 +182,52 @@ def do_test(filename, prueba, conf):
             print("{0} TIMEOUT para entrada {1}".format(filename, prueba.input.split()))
             return False
         print("{0} FALLO para entrada {1}. Lanzada excepción:".format(filename, prueba.input.split()))
+        print(open(conf.ERROR_FILE).read())
         return False
-    return checkOutput(filename, prueba, res, conf)
+    isOk = checkOutput(filename, prueba, res, conf)
+    if isOk and prueba.functions != None:
+        isOk = check_functions(filename, prueba, conf)
+    return isOk
+
+def check_functions(filename, prueba, conf):
+    stdin = sys.stdin
+    sys.stdin = open(conf.INPUT_FILE)
+    stdout = sys.stdout
+    sys.stdout = open(conf.OUTPUT_FILE, mode = "w")
+    stderr = sys.stderr
+    sys.stderr = open(conf.ERROR_FILE, mode = "w")
+    globales = {}
+    excepción = None
+    try:
+        prg = open(filename, encoding="utf-8").read()
+        exec(prg, globales)
+    except Exception as e:
+        excepción = e
+    sys.stdin.close()
+    sys.stdin = stdin
+    sys.stdout.close()
+    sys.stdout = stdout
+    sys.stdout.close()
+    sys.stdout = stderr
+    if excepción != None: # Esto no debería pasar nunca
+        print("{0} FALLO para entrada {1}. Lanzada excepción.".format(filename, prueba.input.split()))
+        print(excepción)
+        return False
+    for pf in prueba.functions:
+        if pf.fname not in globales:
+            print ("{} FALLO, no implementa la función {}.".format(filename, pf.fname))
+            return False
+        f = globales[pf.fname]
+        for (pars, res) in pf.tests:
+            try:
+                user = f(*pars)
+            except Exception as e:
+                print ("{} FALLO, la función {} con {} lanza una excepción:".format(filename, pf.fname, pars))
+                traceback.print_exc()
+            if user != res:
+                print ("{} FALLO, la función {} con {} da como resultado {} en lugar de {}".format(filename, pf.fname, pars, user, res))
+                return False
+    return True
 
 def esta_implementado(fichero):
     return os.path.isfile(fichero) and os.stat(fichero).st_size > 0
@@ -259,6 +304,8 @@ class Configuración:
               ("work", []),
               ("CREATE_ZIP", True),
               ("INPUT_FILE", ".inp"),
+              ("OUTPUT_FILE", ".out"),
+              ("ERROR_FILE", ".err"),
               ("NUM_MAX_EJERCICIOS_MAL", 0) # de los obligatorios
               ]
 
