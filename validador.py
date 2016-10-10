@@ -136,13 +136,13 @@ def posDiferencia(cad1, cad2):
             return i
     return len(cad1)
 
-def checkOutput(filename, inp, out, image, res, conf):
+def checkOutput(filename, prueba, res, conf):
     user = res.decode('utf8').strip()
-    if len(inp)>0 and inp[-1]=="\n":
-        entrada = inp[:-1].split("\n")
+    if len(prueba.input)>0 and prueba.input[-1]=="\n":
+        entrada = prueba.input[:-1].split("\n")
     else:
-        entrada = inp.split("\n")
-    hayDiferencias, encontrado, esperado = comparaSalida(user, out)
+        entrada = prueba.input.split("\n")
+    hayDiferencias, encontrado, esperado = comparaSalida(user, prueba.output)
     if hayDiferencias:
         print("{0} FALLO para entrada {1}.".format(filename, entrada))
         if encontrado != None and esperado != None:
@@ -159,52 +159,30 @@ def checkOutput(filename, inp, out, image, res, conf):
             print(encontrado)
             print()
     ficherosDistintos = False
-    if image != None:
-        ficherosDistintos,  posicion = comprobarFichero(image, conf)
+    if prueba.image != None:
+        ficherosDistintos,  posicion = comprobarFichero(prueba.image, conf)
         if ficherosDistintos:
             if posicion == None:
                 print("{0} FALLO para entrada {1}. Las dimensiones de la imagen resultado no coinciden con las esperadas".format(filename, entrada))
             else:
                 fila, columna, encontrado, esperado = posicion
-                print("{0} FALLO para entrada {1}. En la fila {2} y columna {3} se ha encontrado el valor {4} y se esperaba {5}".format(filename, inp.split(), fila, columna, encontrado, esperado))
+                print("{0} FALLO para entrada {1}. En la fila {2} y columna {3} se ha encontrado el valor {4} y se esperaba {5}".format(filename, entrada, fila, columna, encontrado, esperado))
     return not (hayDiferencias or ficherosDistintos)
 
-def check_function_output(filename):
-    with open(".funciones_output.txt","r",encoding="utf-8") as f:
-        lineas = f.read()
-        if len(lineas) == 0:
-            return False
-        print("Error en las funciones de", filename)
-        print(lineas)
-        return True
-
-def check_function_output_for_exception(filename):
-    with open(".funciones_output.txt","r",encoding="utf-8") as f:
-        lineas = f.read().split("\n")
-        if len(lineas) == 0:
-            return False
-        for l in lineas:
-            print("\t",l)
-        return True
-
-def do_test(filename, inp, out, image, check_function, conf):
-    programa = [executable, conf.VALIDADOR_FUNCIONES, filename] if check_function else [executable, filename]
+def do_test(filename, prueba, conf):
+    programa = [executable, filename]
     try:
         if version_info >= (3, 3):
-            res = subprocess.check_output(programa, stdin=open('.fin'), timeout=conf.TIMEOUT)
+            res = subprocess.check_output(programa, stdin=open(conf.INPUT_FILE), timeout=conf.TIMEOUT)
         else:
-            res = subprocess.check_output(programa, stdin=open('.fin'))
+            res = subprocess.check_output(programa, stdin=open(conf.INPUT_FILE))
     except Exception as e:
         if version_info >= (3, 3) and isinstance(e, subprocess.TimeoutExpired):
-            print("{0} TIMEOUT para entrada {1}".format(filename, inp.split()))
+            print("{0} TIMEOUT para entrada {1}".format(filename, prueba.input.split()))
             return False
-        print("{0} FALLO para entrada {1}. Lanzada excepción:".format(filename, inp.split()))
-        if check_function: check_function_output_for_exception(filename)
+        print("{0} FALLO para entrada {1}. Lanzada excepción:".format(filename, prueba.input.split()))
         return False
-    if check_function:
-        if check_function_output(filename):
-            return False
-    return checkOutput(filename, inp, out, image, res, conf)
+    return checkOutput(filename, prueba, res, conf)
 
 def esta_implementado(fichero):
     return os.path.isfile(fichero) and os.stat(fichero).st_size > 0
@@ -226,19 +204,10 @@ def prueba_ejercicio(conf, ejercicio, resultado):
         print("{0} no tiene pruebas (compruébalo manualmente)".format(filename))
         return
     isOk = True
-    for pos, data in enumerate(ejercicio.pruebas):
-        if len(data) == 2:
-            inp, out = data
-            image = None
-        elif len(data) == 3:
-            inp, out, image = data
-        else:
-            print("Formato de pruebas no válido para {0}".format(filename))
-            isOk = False
-            break
-        with codecs.open(".fin", "w", "utf8") as in_file:
-            in_file.write(inp)
-        isOk = do_test(filename, inp, out, image, pos==0 and conf.VALIDADOR_FUNCIONES!="", conf)
+    for prueba in ejercicio.pruebas:
+        with codecs.open(conf.INPUT_FILE, "w", "utf8") as in_file:
+            in_file.write(prueba.input)
+        isOk = do_test(filename, prueba, conf)
         if not isOk:
             break
     if isOk:
@@ -289,7 +258,7 @@ class Configuración:
               ("NUM_PRACTICA", -1),
               ("work", []),
               ("CREATE_ZIP", True),
-              ("VALIDADOR_FUNCIONES", ""),
+              ("INPUT_FILE", ".inp"),
               ("NUM_MAX_EJERCICIOS_MAL", 0) # de los obligatorios
               ]
 
@@ -308,8 +277,20 @@ class Configuración:
 class Ejercicio:
     def __init__(self, entrada):
         self.nombre = entrada[0]
-        self.pruebas = entrada[-1]
+        self.pruebas = [Prueba(p) for p in entrada[-1]]
         self.obligatorio = len(entrada) == 2 or entrada[1]
+
+class Prueba:
+    def __init__(self, entrada):
+        self.input = entrada[0]
+        self.output = entrada[1]
+        self.image = entrada[2] if len(entrada) > 2 else None
+        self.functions = [ FunctionTest(ft) for ft in entrada[3] ] if len(entrada) > 3 else None
+
+class FunctionTest:
+    def __init__(self, entrada):
+        self.fname = entrada[0]
+        self.tests = entrada[1]
 
 def lee_configuración():
     # busca el fichero de configuración del validador
