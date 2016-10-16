@@ -1,11 +1,13 @@
+
 '''
 Created on 16/07/2014
 
-@version 1.3.0 (2016-09-16)
+@version 1.3.1 (2016-10-16)
 @author: David Llorens (dllorens@uji.es)
-         Federico Prat (fpart@uji.es)
+         Federico Prat (fprat@uji.es)
          Juan Miguel Vilar (jvilar@uji.es)
 
+1.3.1 - Pruebas de funciones integradas en el validador.
 1.3.0 - Reestructuración del código y cambio en el modo de funcionamiento para que
         pueda validar sólo un ejercicio.
 1.2.10- Antes se llamaba a check_function_output_for_exception sin comprobar si
@@ -68,6 +70,8 @@ propio comprobador.
 
 import codecs
 import glob
+import inspect
+import io
 import os
 from sys import version_info, executable
 import sys
@@ -172,11 +176,13 @@ def checkOutput(filename, prueba, res, conf):
 
 def do_test(filename, prueba, conf):
     programa = [executable, filename]
+    with codecs.open(conf.INPUT_FILE, "w", "utf8") as in_file:
+        in_file.write(prueba.input)
     try:
         if version_info >= (3, 3):
-            res = subprocess.check_output(programa, stdin=open(conf.INPUT_FILE), stderr = open(conf.ERROR_FILE, "w"), timeout=conf.TIMEOUT)
+            res = subprocess.check_output(programa, stdin = open(conf.INPUT_FILE), stderr = open(conf.ERROR_FILE, "w"), timeout=conf.TIMEOUT)
         else:
-            res = subprocess.check_output(programa, stdin=open(conf.INPUT_FILE))
+            res = subprocess.check_output(programa, stdin = open(conf.INPUT_FILE))
     except Exception as e:
         if version_info >= (3, 3) and isinstance(e, subprocess.TimeoutExpired):
             print("{0} TIMEOUT para entrada {1}".format(filename, prueba.input.split()))
@@ -189,13 +195,26 @@ def do_test(filename, prueba, conf):
         isOk = check_functions(filename, prueba, conf)
     return isOk
 
-def check_functions(filename, prueba, conf):
+def redirectIO (conf, input):
     stdin = sys.stdin
-    sys.stdin = open(conf.INPUT_FILE)
+    sys.stdin = io.StringIO(input)
     stdout = sys.stdout
     sys.stdout = open(conf.OUTPUT_FILE, mode = "w")
     stderr = sys.stderr
     sys.stderr = open(conf.ERROR_FILE, mode = "w")
+    return (stdin, stdout, stderr)
+
+def restoreIO (io):
+    (stdin, stdout, stderr) = io
+    sys.stdin.close()
+    sys.stdin = stdin
+    sys.stdout.close()
+    sys.stdout = stdout
+    sys.stderr.close()
+    sys.stderr = stderr
+
+def check_functions(filename, prueba, conf):
+    io = redirectIO(conf, prueba.input)
     globales = {}
     excepción = None
     try:
@@ -203,29 +222,40 @@ def check_functions(filename, prueba, conf):
         exec(prg, globales)
     except Exception as e:
         excepción = e
-    sys.stdin.close()
-    sys.stdin = stdin
-    sys.stdout.close()
-    sys.stdout = stdout
-    sys.stdout.close()
-    sys.stdout = stderr
+    restoreIO(io)
     if excepción != None: # Esto no debería pasar nunca
         print("{0} FALLO para entrada {1}. Lanzada excepción.".format(filename, prueba.input.split()))
         print(excepción)
         return False
+    toDelete = [k for (k, v) in globales.items() if not inspect.isfunction(v) and k != "__builtins__" ]
+    for k in toDelete:
+        del (globales[k])
     for pf in prueba.functions:
         if pf.fname not in globales:
             print ("{} FALLO, no implementa la función {}.".format(filename, pf.fname))
             return False
         f = globales[pf.fname]
+        original = set(globales.keys())
         for (pars, res) in pf.tests:
+            io = redirectIO(conf, "")
+            excepcion = None
             try:
                 user = f(*pars)
             except Exception as e:
-                print ("{} FALLO, la función {} con {} lanza una excepción:".format(filename, pf.fname, pars))
-                traceback.print_exc()
+                excepcion = e
+            finally:
+                restoreIO(io)
+            if excepcion != None:
+                print ("{} FALLO, la función {} con {} lanza una excepción: {}".format(filename, pf.fname, pars, excepcion))
+                return False
             if user != res:
                 print ("{} FALLO, la función {} con {} da como resultado {} en lugar de {}".format(filename, pf.fname, pars, user, res))
+                return False
+            diff = globales.keys() - original
+            if len(diff) == 1:
+                print ("{} FALLO, la funcion {} asigna a la variable global {}.".format(filename, pf.fname, ", ".join(diff)))
+            elif len(diff) > 1:
+                print ("{} FALLO, la funcion {} asigna a las variables globales {}.".format(filename, pf.fname, ", ".join(diff)))
                 return False
     return True
 
@@ -250,8 +280,6 @@ def prueba_ejercicio(conf, ejercicio, resultado):
         return
     isOk = True
     for prueba in ejercicio.pruebas:
-        with codecs.open(conf.INPUT_FILE, "w", "utf8") as in_file:
-            in_file.write(prueba.input)
         isOk = do_test(filename, prueba, conf)
         if not isOk:
             break
