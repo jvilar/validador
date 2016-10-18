@@ -69,9 +69,10 @@ propio comprobador.
 '''
 
 import codecs
+import copy
 import glob
 import inspect
-import io
+from io import StringIO
 import os
 from sys import version_info, executable
 import sys
@@ -141,6 +142,21 @@ def posDiferencia(cad1, cad2):
             return i
     return len(cad1)
 
+def prettyPrintDiferencias(encontrado, esperado):
+    if encontrado != None and esperado != None:
+        print("    Se esperaba: {0}".format(esperado))
+        print("    Encontrado : {0}".format(encontrado))
+        print(" "*(posDiferencia(esperado,encontrado)+15)+"**^**")
+        print()
+    elif esperado!= None:
+        print("La salida no está completa. Faltan las siguientes líneas: ")
+        print(esperado)
+        print()
+    else:
+        print("Hay más líneas de las esperadas. Sobran las siguientes líneas: ")
+        print(encontrado)
+        print()
+
 def checkOutput(filename, prueba, res, conf):
     user = res.decode('utf8').strip()
     if len(prueba.input)>0 and prueba.input[-1]=="\n":
@@ -150,19 +166,7 @@ def checkOutput(filename, prueba, res, conf):
     hayDiferencias, encontrado, esperado = comparaSalida(user, prueba.output)
     if hayDiferencias:
         print("{0} FALLO para entrada {1}.".format(filename, entrada))
-        if encontrado != None and esperado != None:
-            print("    Se esperaba: {0}".format(esperado))
-            print("    Encontrado : {0}".format(encontrado))
-            print(" "*(posDiferencia(esperado,encontrado)+15)+"**^**")
-            print()
-        elif esperado!= None:
-            print("La salida del programa no está completa. Faltan las siguientes líneas: ")
-            print(esperado)
-            print()
-        else:
-            print("El programa ha generado más líneas de las esperadas. Sobran las siguientes líneas: ")
-            print(encontrado)
-            print()
+        prettyPrintDiferencias(encontrado, esperado)
     ficherosDistintos = False
     if prueba.image != None:
         ficherosDistintos,  posicion = comprobarFichero(prueba.image, conf)
@@ -195,11 +199,11 @@ def do_test(filename, prueba, conf):
         isOk = check_functions(filename, prueba, conf)
     return isOk
 
-def redirectIO (conf, input):
+def redirectIO (conf, input, output):
     stdin = sys.stdin
-    sys.stdin = io.StringIO(input)
+    sys.stdin = StringIO(input)
     stdout = sys.stdout
-    sys.stdout = open(conf.OUTPUT_FILE, mode = "w")
+    sys.stdout = output
     stderr = sys.stderr
     sys.stderr = open(conf.ERROR_FILE, mode = "w")
     return (stdin, stdout, stderr)
@@ -214,7 +218,7 @@ def restoreIO (io):
     sys.stderr = stderr
 
 def check_functions(filename, prueba, conf):
-    io = redirectIO(conf, prueba.input)
+    io = redirectIO(conf, prueba.input, open(conf.OUTPUT_FILE, mode = "w"))
     globales = {}
     excepción = None
     try:
@@ -236,14 +240,17 @@ def check_functions(filename, prueba, conf):
             return False
         f = globales[pf.fname]
         original = set(globales.keys())
-        for (pars, res) in pf.tests:
-            io = redirectIO(conf, "")
+        for (pars, res, parsExpected, outputExpected) in pf.tests:
+            output = StringIO("")
             excepcion = None
+            parsActual = copy.deepcopy(pars)
+            io = redirectIO(conf, "", output)
             try:
-                user = f(*pars)
+                user = f(*parsActual)
             except Exception as e:
                 excepcion = e
             finally:
+                outputActual = output.getvalue()
                 restoreIO(io)
             if excepcion != None:
                 print ("{} FALLO, la función {} con {} lanza una excepción: {}".format(filename, pf.fname, pars, excepcion))
@@ -253,10 +260,21 @@ def check_functions(filename, prueba, conf):
                 return False
             diff = globales.keys() - original
             if len(diff) == 1:
-                print ("{} FALLO, la funcion {} asigna a la variable global {}.".format(filename, pf.fname, ", ".join(diff)))
-            elif len(diff) > 1:
-                print ("{} FALLO, la funcion {} asigna a las variables globales {}.".format(filename, pf.fname, ", ".join(diff)))
+                print ("{} FALLO, la función {} asigna a la variable global {}.".format(filename, pf.fname, ", ".join(diff)))
                 return False
+            elif len(diff) > 1:
+                print ("{} FALLO, la función {} asigna a las variables globales {}.".format(filename, pf.fname, ", ".join(diff)))
+                return False
+            if parsExpected != parsActual:
+                print ("{} FALLO, la función {} no trata los parametros como se espera.".format(filename, pf.fname))
+                for i,p in enumerate(parsExpected):
+                    if p != parsActual[i]:
+                        print("El parámetro {} tenía que valer {} y vale {}".format(i, p, parsActual[i]))
+                return False
+            hayDiferencias, encontrado, esperado = comparaSalida(outputExpected, outputActual)
+            if hayDiferencias:
+                print("{0} FALLO, la funcion  {} con {} no da la salida correcta.".format(filename, pf.fname, pars))
+                prettyPrintDiferencias(encontrado, esperado)
     return True
 
 def esta_implementado(fichero):
