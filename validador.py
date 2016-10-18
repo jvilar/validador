@@ -269,12 +269,13 @@ def check_functions(filename, prueba, conf):
                 print ("{} FALLO, la función {} no trata los parametros como se espera.".format(filename, pf.fname))
                 for i,p in enumerate(parsExpected):
                     if p != parsActual[i]:
-                        print("El parámetro {} tenía que valer {} y vale {}".format(i, p, parsActual[i]))
+                        print("Al salir, el parámetro {} tenía que valer {} y vale {}".format(i + 1, p, parsActual[i]))
                 return False
-            hayDiferencias, encontrado, esperado = comparaSalida(outputExpected, outputActual)
+            hayDiferencias, encontrado, esperado = comparaSalida(outputActual, outputExpected)
             if hayDiferencias:
-                print("{0} FALLO, la funcion  {} con {} no da la salida correcta.".format(filename, pf.fname, pars))
+                print("{} FALLO, la funcion {} con {} no da la salida correcta.".format(filename, pf.fname, pars))
                 prettyPrintDiferencias(encontrado, esperado)
+                return False
     return True
 
 def esta_implementado(fichero):
