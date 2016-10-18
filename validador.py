@@ -74,6 +74,7 @@ import glob
 import inspect
 from io import StringIO
 import os
+import signal
 from sys import version_info, executable
 import sys
 import traceback
@@ -158,12 +159,11 @@ def prettyPrintDiferencias(encontrado, esperado):
         print()
 
 def checkOutput(filename, prueba, res, conf):
-    user = res.decode('utf8').strip()
     if len(prueba.input)>0 and prueba.input[-1]=="\n":
         entrada = prueba.input[:-1].split("\n")
     else:
         entrada = prueba.input.split("\n")
-    hayDiferencias, encontrado, esperado = comparaSalida(user, prueba.output)
+    hayDiferencias, encontrado, esperado = comparaSalida(res, prueba.output)
     if hayDiferencias:
         print("{0} FALLO para entrada {1}.".format(filename, entrada))
         prettyPrintDiferencias(encontrado, esperado)
@@ -179,33 +179,31 @@ def checkOutput(filename, prueba, res, conf):
     return not (hayDiferencias or ficherosDistintos)
 
 def do_test(filename, prueba, conf):
-    programa = [executable, filename]
-    with codecs.open(conf.INPUT_FILE, "w", "utf8") as in_file:
-        in_file.write(prueba.input)
-    try:
-        if version_info >= (3, 3):
-            res = subprocess.check_output(programa, stdin = open(conf.INPUT_FILE), stderr = open(conf.ERROR_FILE, "w"), timeout=conf.TIMEOUT)
+    em = executionManager(conf.TIMEOUT)
+    result = em.exec_file(filename, prueba.input)
+    if result.exception != None:
+        if isinstance (result.exception, TimeoutError):
+            print("{0} TIMEOUT para entrada {1}.".format(filename, prueba.input.split()))
         else:
-            res = subprocess.check_output(programa, stdin = open(conf.INPUT_FILE))
-    except Exception as e:
-        if version_info >= (3, 3) and isinstance(e, subprocess.TimeoutExpired):
-            print("{0} TIMEOUT para entrada {1}".format(filename, prueba.input.split()))
-            return False
-        print("{0} FALLO para entrada {1}. Lanzada excepción:".format(filename, prueba.input.split()))
-        print(open(conf.ERROR_FILE).read())
+            print("{0} FALLO para entrada {1}. Lanzada excepción:".format(filename, prueba.input.split()))
+            print(result.error)
         return False
-    isOk = checkOutput(filename, prueba, res, conf)
+    if result.error != "":
+        print("{0} FALLO para entrada {1}. Salida de error:".format(filename, prueba.input.split()))
+        print(result.error)
+        return False
+    isOk = checkOutput(filename, prueba, result.output, conf)
     if isOk and prueba.functions != None:
-        isOk = check_functions(filename, prueba, conf)
+        isOk = check_functions(filename, prueba, conf, em, result.globals)
     return isOk
 
-def redirectIO (conf, input, output):
+def redirectIO (input, output, error):
     stdin = sys.stdin
-    sys.stdin = StringIO(input)
+    sys.stdin = input
     stdout = sys.stdout
     sys.stdout = output
     stderr = sys.stderr
-    sys.stderr = open(conf.ERROR_FILE, mode = "w")
+    sys.stderr = error
     return (stdin, stdout, stderr)
 
 def restoreIO (io):
@@ -217,20 +215,60 @@ def restoreIO (io):
     sys.stderr.close()
     sys.stderr = stderr
 
-def check_functions(filename, prueba, conf):
-    io = redirectIO(conf, prueba.input, open(conf.OUTPUT_FILE, mode = "w"))
-    globales = {}
-    excepción = None
-    try:
-        prg = open(filename, encoding="utf-8").read()
-        exec(prg, globales)
-    except Exception as e:
-        excepción = e
-    restoreIO(io)
-    if excepción != None: # Esto no debería pasar nunca
-        print("{0} FALLO para entrada {1}. Lanzada excepción.".format(filename, prueba.input.split()))
-        print(excepción)
-        return False
+class timeout:
+    def __init__(self, seconds=1, error_message='Timeout'):
+        self.seconds = seconds
+        self.error_message = error_message
+    def handle_timeout(self, signum, frame):
+        raise TimeoutError(self.error_message)
+    def __enter__(self):
+        signal.signal(signal.SIGALRM, self.handle_timeout)
+        signal.alarm(self.seconds)
+    def __exit__(self, type, value, traceback):
+        signal.alarm(0)
+
+class executionResult:
+    def __init__(self, value = None, output = None, error = None, exception = None, globals = None):
+        self.value = value
+        self.output = output
+        self.error = error
+        self.exception = exception
+        self.globals = globals
+
+class executionManager:
+    def __init__(self, timeout = None):
+        self.timeout = timeout
+
+    def exec_file(self, filename, input):
+        def code(filename, globals):
+            prg = open(filename, encoding="utf-8").read()
+            exec(prg, globals)
+
+        globals = {}
+        result = self.exec_function(code, (filename, globals), input)
+        result.globals = globals
+        return result
+
+    def exec_function(self, f, pars, input):
+        output = StringIO("")
+        error = StringIO("")
+        io = redirectIO(StringIO(input), output, error)
+        exception = None
+        value = None
+        try:
+            if self.timeout != None:
+                with timeout(self.timeout):
+                    value = f(*pars)
+            else:
+                value = f(*pars)
+        except Exception as e:
+            exception = e
+        finally:
+            result = executionResult(value = value, output = output.getvalue(), error = error.getvalue(), exception = exception)
+            restoreIO(io)
+        return result
+
+def check_functions(filename, prueba, conf, em, globales):
     toDelete = [k for (k, v) in globales.items() if not inspect.isfunction(v) and k != "__builtins__" ]
     for k in toDelete:
         del (globales[k])
@@ -241,22 +279,13 @@ def check_functions(filename, prueba, conf):
         f = globales[pf.fname]
         original = set(globales.keys())
         for (pars, res, parsExpected, outputExpected) in pf.tests:
-            output = StringIO("")
-            excepcion = None
             parsActual = copy.deepcopy(pars)
-            io = redirectIO(conf, "", output)
-            try:
-                user = f(*parsActual)
-            except Exception as e:
-                excepcion = e
-            finally:
-                outputActual = output.getvalue()
-                restoreIO(io)
-            if excepcion != None:
-                print ("{} FALLO, la función {} con {} lanza una excepción: {}".format(filename, pf.fname, pars, excepcion))
+            result = em.exec_function(f, parsActual, "")
+            if result.exception != None:
+                print ("{} FALLO, la función {} con {} lanza una excepción: {}".format(filename, pf.fname, pars, result.exception))
                 return False
-            if user != res:
-                print ("{} FALLO, la función {} con {} da como resultado {} en lugar de {}".format(filename, pf.fname, pars, user, res))
+            if result.value != res:
+                print ("{} FALLO, la función {} con {} da como resultado {} en lugar de {}".format(filename, pf.fname, pars, result.value, res))
                 return False
             diff = globales.keys() - original
             if len(diff) == 1:
@@ -271,7 +300,7 @@ def check_functions(filename, prueba, conf):
                     if p != parsActual[i]:
                         print("Al salir, el parámetro {} tenía que valer {} y vale {}".format(i + 1, p, parsActual[i]))
                 return False
-            hayDiferencias, encontrado, esperado = comparaSalida(outputActual, outputExpected)
+            hayDiferencias, encontrado, esperado = comparaSalida(result.output, outputExpected)
             if hayDiferencias:
                 print("{} FALLO, la funcion {} con {} no da la salida correcta.".format(filename, pf.fname, pars))
                 prettyPrintDiferencias(encontrado, esperado)
