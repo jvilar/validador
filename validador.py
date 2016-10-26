@@ -269,15 +269,12 @@ class executionManager:
         return result
 
 def check_functions(filename, prueba, conf, em, globales):
-    toDelete = [k for (k, v) in globales.items() if not inspect.isfunction(v) and k != "__builtins__" ]
-    for k in toDelete:
-        del (globales[k])
     for pf in prueba.functions:
         if pf.fname not in globales:
             print ("{} FALLO, no implementa la función {}.".format(filename, pf.fname))
             return False
         f = globales[pf.fname]
-        original = set(globales.keys())
+        original = dict(globales.items())
         for (pars, res, parsExpected, outputExpected) in pf.tests:
             parsActual = copy.deepcopy(pars)
             result = em.exec_function(f, parsActual, "")
@@ -287,13 +284,10 @@ def check_functions(filename, prueba, conf, em, globales):
             if result.value != res:
                 print ("{} FALLO, la función {} con {} da como resultado {} en lugar de {}".format(filename, pf.fname, pars, result.value, res))
                 return False
-            diff = globales.keys() - original
-            if len(diff) == 1:
-                print ("{} FALLO, la función {} asigna a la variable global {}.".format(filename, pf.fname, ", ".join(diff)))
-                return False
-            elif len(diff) > 1:
-                print ("{} FALLO, la función {} asigna a las variables globales {}.".format(filename, pf.fname, ", ".join(diff)))
-                return False
+            for (var, valor) in globales.items():
+                if var not in original or valor != original[var]:
+                    print ("{} FALLO, la función {} asigna a la variable global {}.".format(filename, pf.fname, var))
+                    return False
             if parsExpected != parsActual:
                 print ("{} FALLO, la función {} no trata los parametros como se espera.".format(filename, pf.fname))
                 for i,p in enumerate(parsExpected):
@@ -417,7 +411,7 @@ class FunctionTest:
 
 def lee_configuración():
     # busca el fichero de configuración del validador
-    matching_files = glob.glob('./validador_prac[0-9].cfg')
+    matching_files = glob.glob('./validador_prac[0-9]*.cfg')
     if len(matching_files) == 0:
         error("Falta el fichero de configuración del validador (validador_prac<num>.cfg). Copia a este directorio el que corresponda a esta práctica")
     elif len(matching_files)>1:
