@@ -275,28 +275,28 @@ def check_functions(filename, prueba, conf, em, globales):
             return False
         f = globales[pf.fname]
         original = dict(globales.items())
-        for (pars, res, parsExpected, outputExpected) in pf.tests:
-            parsActual = copy.deepcopy(pars)
-            result = em.exec_function(f, parsActual, "")
+        for test in pf.tests:
+            parsActual = copy.deepcopy(test.pars)
+            result = em.exec_function(f, parsActual, test.stdin)
             if result.exception != None:
-                print ("{} FALLO, la función {} con {} lanza una excepción: {}".format(filename, pf.fname, pars, result.exception))
+                print ("{} FALLO, la función {} con {} lanza una excepción: {}".format(filename, pf.fname, test.pars, result.exception))
                 return False
-            if result.value != res:
-                print ("{} FALLO, la función {} con {} da como resultado {} en lugar de {}".format(filename, pf.fname, pars, result.value, res))
+            if result.value != test.result:
+                print ("{} FALLO, la función {} con {} da como resultado {} en lugar de {}".format(filename, pf.fname, test.pars, result.value, test.result))
                 return False
             for (var, valor) in globales.items():
                 if var not in original or valor != original[var]:
                     print ("{} FALLO, la función {} asigna a la variable global {}.".format(filename, pf.fname, var))
                     return False
-            if parsExpected != parsActual:
+            if test.finalPars != parsActual:
                 print ("{} FALLO, la función {} no trata los parametros como se espera.".format(filename, pf.fname))
-                for i,p in enumerate(parsExpected):
+                for i,p in enumerate(test.finalPars):
                     if p != parsActual[i]:
                         print("Al salir, el parámetro {} tenía que valer {} y vale {}".format(i + 1, p, parsActual[i]))
                 return False
-            hayDiferencias, encontrado, esperado = comparaSalida(result.output, outputExpected)
+            hayDiferencias, encontrado, esperado = comparaSalida(result.output, test.stdout)
             if hayDiferencias:
-                print("{} FALLO, la funcion {} con {} no da la salida correcta.".format(filename, pf.fname, pars))
+                print("{} FALLO, la funcion {} con {} no da la salida correcta.".format(filename, pf.fname, test.pars))
                 prettyPrintDiferencias(encontrado, esperado)
                 return False
     return True
@@ -366,16 +366,13 @@ class Resultado:
 
 
 class Configuración:
-    fields = [("VERSION", "1.3.0"),
+    fields = [("VERSION", "1.3.1"),
               ("TIMEOUT", 5), #seconds
               ("RESULTDIR", "resultados/"),
               ("IMAGEFILENAME", ".imagen.txt"),
               ("NUM_PRACTICA", -1),
               ("work", []),
               ("CREATE_ZIP", True),
-              ("INPUT_FILE", ".inp"),
-              ("OUTPUT_FILE", ".out"),
-              ("ERROR_FILE", ".err"),
               ("NUM_MAX_EJERCICIOS_MAL", 0) # de los obligatorios
               ]
 
@@ -402,12 +399,20 @@ class Prueba:
         self.input = entrada[0]
         self.output = entrada[1]
         self.image = entrada[2] if len(entrada) > 2 else None
-        self.functions = [ FunctionTest(ft) for ft in entrada[3] ] if len(entrada) > 3 else None
+        self.functions = [ FunctionTestList(ftl) for ftl in entrada[3] ] if len(entrada) > 3 else None
+
+class FunctionTestList:
+    def __init__(self, entrada):
+        self.fname = entrada[0]
+        self.tests = [ FunctionTest(ft) for ft in entrada[1] ]
 
 class FunctionTest:
     def __init__(self, entrada):
-        self.fname = entrada[0]
-        self.tests = entrada[1]
+        self.pars = entrada[0]
+        self.stdin = entrada[1]
+        self.result = entrada[2]
+        self.finalPars = entrada[3]
+        self.stdout = entrada[4]
 
 def lee_configuración():
     # busca el fichero de configuración del validador
