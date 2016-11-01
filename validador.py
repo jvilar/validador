@@ -179,9 +179,8 @@ def checkOutput(filename, prueba, res, conf):
                 print("{0} FALLO para entrada {1}. En la fila {2} y columna {3} se ha encontrado el valor {4} y se esperaba {5}".format(filename, entrada, fila, columna, encontrado, esperado))
     return not (hayDiferencias or ficherosDistintos)
 
-def do_test(filename, prueba, conf):
-    em = executionManager(conf.TIMEOUT)
-    result = em.exec_file(filename, prueba.input)
+def do_test(filename, em, prueba, conf):
+    result = em.exec_program(prueba.input)
     if result.exception != None:
         if not conf.TIMEOUT is None and isinstance (result.exception, TimeoutError):
             print("{0} TIMEOUT para entrada {1}.".format(filename, prueba.input.split()))
@@ -240,16 +239,15 @@ class executionResult:
         self.globals = globals
 
 class executionManager:
-    def __init__(self, timeout = None):
+    def __init__(self, filename, timeout = None):
         self.timeout = timeout
+        source = open(filename, encoding="utf-8").read()
+        self.filename = filename
+        self.prg = compile(source, filename, "exec")
 
-    def exec_file(self, filename, input):
-        def code(filename, globals):
-            prg = open(filename, encoding="utf-8").read()
-            exec(prg, globals)
-
+    def exec_program(self, input):
         globals = {}
-        result = self.exec_function(code, (filename, globals), input)
+        result = self.exec_function(exec, (self.prg, globals), input)
         result.globals = globals
         return result
 
@@ -267,6 +265,13 @@ class executionManager:
                 value = f(*pars)
         except Exception as e:
             exception = e
+            lines = traceback.format_exception(*sys.exc_info())
+            i = 0
+            while i < len(lines):
+                l = lines[i]
+                if not '"validador.py"' in l:
+                    error.write(l)
+                i += 1
         finally:
             result = executionResult(value = value, output = output.getvalue(), error = error.getvalue(), exception = exception)
             restoreIO(io)
@@ -292,7 +297,8 @@ def is_ok_function(fname, test, filename, em, globales, original):
     parsActual = copy.deepcopy(test.pars)
     result = em.exec_function(globales[fname], parsActual, test.stdin)
     if result.exception != None:
-        print ("{} FALLO, la función {} con {} lanza una excepción: {}".format(filename, fname, test.pars, result.exception))
+        print ("{} FALLO, la función {} con {} lanza una excepción:".format(filename, fname, test.pars))
+        print (result.error)
         return False
     if result.value != test.result:
         print ("{} FALLO, la función {} con {} da como resultado {} en lugar de {}".format(filename, fname, test.pars, result.value, test.result))
@@ -334,8 +340,9 @@ def prueba_ejercicio(conf, ejercicio, resultado):
         print("{0} no tiene pruebas (compruébalo manualmente)".format(filename))
         return
     isOk = True
+    em = executionManager(filename, conf.TIMEOUT)
     for prueba in ejercicio.pruebas:
-        isOk = do_test(filename, prueba, conf)
+        isOk = do_test(filename, em, prueba, conf)
         if not isOk:
             break
     if isOk:
