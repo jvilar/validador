@@ -2,11 +2,12 @@
 '''
 Created on 16/07/2014
 
-@version 1.3.1 (2016-10-16)
+@version 1.3.2 (2016-11-01)
 @author: David Llorens (dllorens@uji.es)
          Federico Prat (fprat@uji.es)
          Juan Miguel Vilar (jvilar@uji.es)
 
+1.3.2 - Cambio de la sintaxis y mejor integración de pruebas.
 1.3.1 - Pruebas de funciones integradas en el validador.
 1.3.0 - Reestructuración del código y cambio en el modo de funcionamiento para que
         pueda validar sólo un ejercicio.
@@ -182,7 +183,7 @@ def do_test(filename, prueba, conf):
     em = executionManager(conf.TIMEOUT)
     result = em.exec_file(filename, prueba.input)
     if result.exception != None:
-        if isinstance (result.exception, TimeoutError):
+        if not conf.TIMEOUT is None and isinstance (result.exception, TimeoutError):
             print("{0} TIMEOUT para entrada {1}.".format(filename, prueba.input.split()))
         else:
             print("{0} FALLO para entrada {1}. Lanzada excepción:".format(filename, prueba.input.split()))
@@ -219,11 +220,14 @@ class timeout:
     def __init__(self, seconds=1, error_message='Timeout'):
         self.seconds = seconds
         self.error_message = error_message
+
     def handle_timeout(self, signum, frame):
         raise TimeoutError(self.error_message)
+
     def __enter__(self):
         signal.signal(signal.SIGALRM, self.handle_timeout)
         signal.alarm(self.seconds)
+
     def __exit__(self, type, value, traceback):
         signal.alarm(0)
 
@@ -273,32 +277,41 @@ def check_functions(filename, prueba, conf, em, globales):
         if pf.fname not in globales:
             print ("{} FALLO, no implementa la función {}.".format(filename, pf.fname))
             return False
-        f = globales[pf.fname]
-        original = dict(globales.items())
+        original = {}
+        for k, v in globales.items():
+            if k != "__builtins__":
+                original[k] = copy.deepcopy(v)
+            else:
+                original[k] = v
         for test in pf.tests:
-            parsActual = copy.deepcopy(test.pars)
-            result = em.exec_function(f, parsActual, test.stdin)
-            if result.exception != None:
-                print ("{} FALLO, la función {} con {} lanza una excepción: {}".format(filename, pf.fname, test.pars, result.exception))
+            if not is_ok_function(pf.fname, test, filename, em, globales, original):
                 return False
-            if result.value != test.result:
-                print ("{} FALLO, la función {} con {} da como resultado {} en lugar de {}".format(filename, pf.fname, test.pars, result.value, test.result))
-                return False
-            for (var, valor) in globales.items():
-                if var not in original or valor != original[var]:
-                    print ("{} FALLO, la función {} asigna a la variable global {}.".format(filename, pf.fname, var))
-                    return False
-            if test.finalPars != parsActual:
-                print ("{} FALLO, la función {} no trata los parametros como se espera.".format(filename, pf.fname))
-                for i,p in enumerate(test.finalPars):
-                    if p != parsActual[i]:
-                        print("Al salir, el parámetro {} tenía que valer {} y vale {}".format(i + 1, p, parsActual[i]))
-                return False
-            hayDiferencias, encontrado, esperado = comparaSalida(result.output, test.stdout)
-            if hayDiferencias:
-                print("{} FALLO, la funcion {} con {} no da la salida correcta.".format(filename, pf.fname, test.pars))
-                prettyPrintDiferencias(encontrado, esperado)
-                return False
+    return True
+
+def is_ok_function(fname, test, filename, em, globales, original):
+    parsActual = copy.deepcopy(test.pars)
+    result = em.exec_function(globales[fname], parsActual, test.stdin)
+    if result.exception != None:
+        print ("{} FALLO, la función {} con {} lanza una excepción: {}".format(filename, fname, test.pars, result.exception))
+        return False
+    if result.value != test.result:
+        print ("{} FALLO, la función {} con {} da como resultado {} en lugar de {}".format(filename, fname, test.pars, result.value, test.result))
+        return False
+    for (var, valor) in globales.items():
+        if var not in original or valor != original[var]:
+            print ("{} FALLO, la función {} asigna a la variable global {}.".format(filename, fname, var))
+            return False
+    if test.finalPars != parsActual:
+        print ("{} FALLO, la función {} no trata los parametros como se espera.".format(filename, pf.fname))
+        for i,p in enumerate(test.finalPars):
+            if p != parsActual[i]:
+                print("Al salir, el parámetro {} tenía que valer {} y vale {}".format(i + 1, p, parsActual[i]))
+        return False
+    hayDiferencias, encontrado, esperado = comparaSalida(result.output, test.stdout)
+    if hayDiferencias:
+        print("{} FALLO, la funcion {} con {} no da la salida correcta.".format(filename, fname, test.pars))
+        prettyPrintDiferencias(encontrado, esperado)
+        return False
     return True
 
 def esta_implementado(fichero):
@@ -366,7 +379,7 @@ class Resultado:
 
 
 class Configuración:
-    fields = [("VERSION", "1.3.1"),
+    fields = [("VERSION", "1.3.2"),
               ("TIMEOUT", 5), #seconds
               ("RESULTDIR", "resultados/"),
               ("IMAGEFILENAME", ".imagen.txt"),
@@ -380,6 +393,11 @@ class Configuración:
         self.variables = variables
         for (nombre, valor) in Configuración.fields:
             self.asigna(nombre, valor)
+        try:
+            _ = signal.SIGALRM
+            _ = TimeoutError
+        except:
+            self.TIMEOUT = None
 
     def asigna(self, nombre, valor):
         v = self.variables.get(nombre, valor)
@@ -396,6 +414,8 @@ class Ejercicio:
 
 class Prueba:
     def __init__(self, entrada):
+        if len(entrada) < 2:
+            print(entrada)
         self.input = entrada[0]
         self.output = entrada[1]
         self.image = entrada[2] if len(entrada) > 2 else None
