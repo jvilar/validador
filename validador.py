@@ -198,22 +198,15 @@ def do_test(filename, em, prueba, conf):
     return isOk
 
 def redirectIO (input, output, error):
-    stdin = sys.stdin
-    sys.stdin = input
-    stdout = sys.stdout
-    sys.stdout = output
-    stderr = sys.stderr
-    sys.stderr = error
+    stdin, stdout, stderr = sys.stdin, sys.stdout, sys.stderr
+    sys.stdin, sys.stdout, sys.stderr = input, output, error
     return (stdin, stdout, stderr)
 
 def restoreIO (io):
-    (stdin, stdout, stderr) = io
     sys.stdin.close()
-    sys.stdin = stdin
     sys.stdout.close()
-    sys.stdout = stdout
     sys.stderr.close()
-    sys.stderr = stderr
+    sys.stdin, sys.stdout, sys.stderr = io
 
 class timeout:
     def __init__(self, seconds=1, error_message='Timeout'):
@@ -411,30 +404,77 @@ class Configuración:
         if nombre != "work":
             setattr(self, nombre, v)
         else:
-            self.ejercicios = [ Ejercicio(e) for e in v ]
+            self.ejercicios = [ Ejercicio(e, n) for n, e in enumerate(v) ]
+
+
+def has_len_and_items(what, description):
+    if not hasattr(what, "__getitem__"):
+        error(description + " no es del tipo adecuado, no tiene __getitem__")
+    if not hasattr(what, "__len__"):
+        error(description + " no es del tipo adecuado, no tiene __len__")
+
+def is_string(what, description):
+    if not isinstance(what, str):
+        error(description + " no es una cadena")
+
+def is_iterable(what, description):
+    if not hasattr(what, "__iter__"):
+        error(description + " no es iterable")
+
+def at_most_len(what, description, maxlen):
+    if len(what) > maxlen:
+        error("{} debería tener como máximo {} ítems".format(description, maxlen))
+
+def at_least_len(what, description, minlen):
+    if len(what) < minlen:
+        error("{} debería tener como mínimo {} ítems".format(description, minlen))
+
+def exact_len(what, description, expected_len):
+    if len(what) != expected_len:
+        error("{} debería tener {} ítems".format(description, expected_len))
 
 class Ejercicio:
-    def __init__(self, entrada):
-        self.nombre = entrada[0]
-        self.pruebas = [Prueba(p) for p in entrada[-1]]
+    def __init__(self, entrada, n):
+        desc = "la entrada {} de la lista work".format(n)
+        has_len_and_items(entrada, desc)
+        try:
+            self.nombre = entrada[0]
+        except:
+            error("No puedo leer el primer elemento de {}".format(desc))
+        self.pruebas = [Prueba(p, self.nombre, i) for i, p in enumerate(entrada[-1])]
         self.obligatorio = len(entrada) == 2 or entrada[1]
 
 class Prueba:
-    def __init__(self, entrada):
-        if len(entrada) < 2:
-            print(entrada)
+    def __init__(self, entrada, pname, i):
+        desc = "la prueba {} del programa {}".format(i, pname)
+        has_len_and_items(entrada, desc)
+        at_least_len(entrada, desc, 2)
+        at_most_len(entrada, desc, 4)
+
+        is_string(entrada[0], "la entrada de " + desc)
         self.input = entrada[0]
+        is_string(entrada[1], "la salida de " + desc)
         self.output = entrada[1]
+        if len(entrada) > 2 and not entrada[2] is None:
+            is_string(entrada[2], "la imagen de " + desc)
         self.image = entrada[2] if len(entrada) > 2 else None
-        self.functions = [ FunctionTestList(ftl) for ftl in entrada[3] ] if len(entrada) > 3 else None
+        if len(entrada) > 3:
+            is_iterable(entrada[3], "las pruebas de función de " + desc)
+        self.functions = [ FunctionTestList(ftl, pname, j) for j, ftl in enumerate(entrada[3]) ] if len(entrada) > 3 else None
 
 class FunctionTestList:
-    def __init__(self, entrada):
+    def __init__(self, entrada, pname, j):
+        desc = "la prueba {} de función del programa {}".format(j, pname)
+        has_len_and_items(entrada, desc)
+        exact_len(entrada, desc, 2)
         self.fname = entrada[0]
-        self.tests = [ FunctionTest(ft) for ft in entrada[1] ]
+        self.tests = [ FunctionTest(ft, pname, self.fname, i) for i, ft in enumerate(entrada[1]) ]
 
 class FunctionTest:
-    def __init__(self, entrada):
+    def __init__(self, entrada, pname, fname, i):
+        desc = "la prueba {} de la función {} del programa {}".format(i, fname, pname)
+        has_len_and_items(entrada, desc)
+        exact_len(entrada, desc, 5)
         self.pars = entrada[0]
         self.stdin = entrada[1]
         self.result = entrada[2]
