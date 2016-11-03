@@ -1,70 +1,15 @@
-
+#!/bin/env python
 '''
 Created on 16/07/2014
 
-@version 1.3.2 (2016-11-01)
+@version 1.3.3 (2016-11-03)
 @author: David Llorens (dllorens@uji.es)
          Federico Prat (fprat@uji.es)
          Juan Miguel Vilar (jvilar@uji.es)
 
-1.3.2 - Cambio de la sintaxis y mejor integración de pruebas.
-1.3.1 - Pruebas de funciones integradas en el validador.
-1.3.0 - Reestructuración del código y cambio en el modo de funcionamiento para que
-        pueda validar sólo un ejercicio.
-1.2.10- Antes se llamaba a check_function_output_for_exception sin comprobar si
-        se estaban validando funciones o no.
-        Eliminados avisos de Eclipse por sangrado inesperado.
-        NOTA: Cambios de fprat@uji.es
-1.2.9 - Las excepciones que lanza valida_funciones.py dan más información al validador.
-1.2.8 - Distingue ejercicios opcionales, que generan diagnóstico, pero no influyen en
-        "superar" o "no superar" la validación ni aparecen en el posible zip.
-        Se marcan en fichero de configuración con OPTIONAL tras nombre de ejercicio:
-                           ... ["ej22.py", OPTIONAL, [...
-        Correcciones ortográficas ("ejecutandose", "VALIDACION").
-        NOTA: Cambios de fprat@uji.es
-1.2.7 - Si al ir a generar el zip, falta algun *.py,  no se genera (daba error) y se 
-        muestra un mensaje informado de que hay que crearlo, aunque esté vacío.
-1.2.6 - Genera zip cuando el número de ejercicios que no superan las pruebas es inferior 
-        o igual a un umbral.
-1.2.5 - Corregio bugs en codecs
-1.2.4 - Posibilidad de llamar al validador de funciones.
-        Variable VALIDADOR_FUNCIONES en el fichero de configuración.
-1.2.3 - Comprueba que el python sea el 3.1 o superior (el subprocess.check_output 
-        apareció en esa versión).
-1.2.2 - No trata de validar los ficheros ej<num>.py vacíos. Los muestra como una lista
-        al finalizar la validación.
-1.2.1 - Corrige bug .imagen
-1.2.0 - Cambia el formato de los mensajes de error. Ahora se gestionan por líneas 
-        (antes por palabras). Afecta al formato del fichero de configuración.
-        No son válidos los ficheros de las prácticas 1 y 2.
-1.1.2 - Soluciona problema cuando hay acentos en la entrada estándar.
-1.1.1 - El validador define una variable de entorno. Se usa para el módulo de imágenes
-        visualice o no los resultados en una ventana gráfica.
-1.1.0 - Nuevo formato para la variable 'work' en el fichero .cfg
-        Permite, además de validar la entrada estándar, validar un imagen resultado
-        generada mediante 'mostrarImagen'. Cada prueba contiene los datos de entrada, 
-        la salida correspondiente y, opcionalmente, el nombre del fichero que contiene
-        la imagen resultado.
-1.0.8 - Cuando la salida del programa no coincide con la esperada, indica la primera 
-        palabra encontrada que no coincide con la palabra esperada
-1.0.7 - El fichero 'validador_prac<num>.cfg tiene una nueva variable booleana CREATE_ZIP,
-        que vale True por defecto (si no aparece). Permite inhibir la creación del zip.
-        Útil cuando las pruebas no están completas.
-      - Mejora los mensajes de error si el fichero de configuración no existe o tiene
-        un formato erróneo.
-1.0.6 - El validador ya es independiente de las prácticas. Debe haber un fichero 
-        'validador_prac<num>.cfg junto a validador.py. Si no hay ninguno o hay más 
-        de uno, avisa y no valida.
-1.0.5 - Si se pasan todas las pruebas, se genera el ZIP de entrega en el escritorio 
-      - Detecta excepciones lanzadas en el código de los programas evaluados
-1.0.4 - Corrige bug en pruebas 17, 22 y 23 de la práctica 1
-1.0.3 - Corrige bug al mostrar la versión de python utilizada
-1.0.2 - El validador utiliza el python que lo ejecuta a él para validar 
-1.0.1 - Bug corregido (utilizado timeout en python <= 3.3)
-
 Comprobador simple de programas
 -------------------------------
-Si se ejecuta en Python 3.3 o superior utilizará timeouts al lanzar las ejecuciones.
+Si se ejecuta en versiones con sigalrm y TimeoutError utilizará timeouts al lanzar las ejecuciones.
 Esto permite que programas mal construidos (p.e. con bucles infinitos) no bloqueen al
 propio comprobador.
 '''
@@ -379,7 +324,7 @@ class Resultado:
 
 
 class Configuración:
-    fields = [("VERSION", "1.3.2"),
+    fields = [("VERSION", "1.3.3"),
               ("TIMEOUT", 5), #seconds
               ("RESULTDIR", "resultados/"),
               ("IMAGEFILENAME", ".imagen.txt"),
@@ -545,13 +490,14 @@ def cabecera(conf):
     print("-"*ll)
 
 
-def pendientes():
+def opciones():
     while True:
         print("""Opciones:
     + Pulsa INTRO para validar todo y generar el fichero de entrega.
     + Introduce un nombre de fichero para validarlo (p.ej. ej03.py)
     + Introduce un número de fichero sin .py para validarlo con .py (p.ej. ej03 para validar ej03.py)
     + Introduce un número para validar ese ejercicio (p.ej. 3 para validar ej03.py)
+    + Introduce g para generar los ficheros vacíos que falten.
     + Introduce x para salir sin hacer nada.
     """)
         opción = input("¿Qué eliges? ")
@@ -559,6 +505,8 @@ def pendientes():
             return []
         elif opción == "x":
             sys.exit()
+        elif opción == "g":
+            return opción
         else:
             if opción.startswith("ej"):
                 if opción.endswith(".py"):
@@ -576,6 +524,11 @@ def pendientes():
                 print ("El ejercicio {} no está implementado, prueba otra opción.".format(nombre))
             else:
                 return [nombre]
+
+def genera_ficheros(conf):
+    for ejercicio in conf.ejercicios:
+        if not os.path.isfile(ejercicio.nombre):
+            open(ejercicio.nombre, "w").close()
 
 def valida_uno(conf, nombre):
     print("\nProbando:")
@@ -629,8 +582,10 @@ def main():
     conf = lee_configuración()
     # lanza la validación
     cabecera(conf)
-    p = pendientes()
-    if p == []:
+    op = opciones()
+    if op == "g":
+        genera_ficheros(conf)
+    elif p == []:
         valida_todos(conf)
     else:
         valida_uno(conf, p[0])
