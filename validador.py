@@ -246,7 +246,7 @@ def is_ok_function(fname, test, filename, em, globales, original):
             print ("{} FALLO, la función {} asigna a la variable global {}.".format(filename, fname, var))
             return False
     if test.finalPars != parsActual:
-        print ("{} FALLO, la función {} no trata los parametros como se espera.".format(filename, pf.fname))
+        print ("{} FALLO, la función {} no trata los parametros como se espera.".format(filename, fname))
         for i,p in enumerate(test.finalPars):
             if p != parsActual[i]:
                 print("Al salir, el parámetro {} tenía que valer {} y vale {}".format(i + 1, p, parsActual[i]))
@@ -585,10 +585,10 @@ def main():
     op = opciones()
     if op == "g":
         genera_ficheros(conf)
-    elif p == []:
+    elif op == []:
         valida_todos(conf)
     else:
-        valida_uno(conf, p[0])
+        valida_uno(conf, op[0])
 
 if __name__ == "__main__":
     if version_info < (3, 1):
