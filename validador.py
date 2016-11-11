@@ -14,6 +14,7 @@ Esto permite que programas mal construidos (p.e. con bucles infinitos) no bloque
 propio comprobador.
 '''
 
+import ast
 import codecs
 import copy
 import glob
@@ -125,6 +126,10 @@ def checkOutput(filename, prueba, res, conf):
     return not (hayDiferencias or ficherosDistintos)
 
 def do_test(filename, em, prueba, conf):
+    if prueba.functions != None:
+        isOk = check_functions(filename, prueba, conf, em)
+        if not isOk:
+            return False
     result = em.exec_program(prueba.input)
     if result.exception != None:
         if not conf.TIMEOUT is None and isinstance (result.exception, TimeoutError):
@@ -137,10 +142,7 @@ def do_test(filename, em, prueba, conf):
         print("{0} FALLO para entrada {1}. Salida de error:".format(filename, prueba.input.split()))
         print(result.error)
         return False
-    isOk = checkOutput(filename, prueba, result.output, conf)
-    if isOk and prueba.functions != None:
-        isOk = check_functions(filename, prueba, conf, em, result.globals)
-    return isOk
+    return checkOutput(filename, prueba, result.output, conf)
 
 def redirectIO (input, output, error):
     stdin, stdout, stderr = sys.stdin, sys.stdout, sys.stderr
@@ -162,11 +164,13 @@ class timeout:
         raise TimeoutError(self.error_message)
 
     def __enter__(self):
-        signal.signal(signal.SIGALRM, self.handle_timeout)
-        signal.alarm(self.seconds)
+        if not self.seconds is None:
+            signal.signal(signal.SIGALRM, self.handle_timeout)
+            signal.alarm(self.seconds)
 
     def __exit__(self, type, value, traceback):
-        signal.alarm(0)
+        if not self.seconds is None:
+            signal.alarm(0)
 
 class executionResult:
     def __init__(self, value = None, output = None, error = None, exception = None, globals = None):
@@ -182,24 +186,36 @@ class executionManager:
         source = open(filename, encoding="utf-8").read()
         self.filename = filename
         self.prg = compile(source, filename, "exec")
+        tree = ast.parse(source, filename, "exec")
+        decls = [ node for node in tree.body if node.__class__.__name__
+                    in [ "FunctionDef", "ImportFrom", "Import", "ClassDef", "AsyncFunctionDef"] ]
+        declarations = compile(ast.Module(body = decls, lineno = 0, col_offset = 0), filename, "exec")
+        self.functions = {}
+        result = self._do_exec(exec, (declarations, self.functions), "sd")
 
     def exec_program(self, input):
         globals = {}
-        result = self.exec_function(exec, (self.prg, globals), input)
+        result = self._do_exec(exec, (self.prg, globals), input)
         result.globals = globals
         return result
 
-    def exec_function(self, f, pars, input):
+    def exists_function(self, fname):
+        return fname in self.functions
+
+    def exec_function(self, fname, pars, input):
+        f = self.functions[fname]
+        result = self._do_exec(f, pars, input)
+        result.globals = self.functions
+        return result
+
+    def _do_exec(self, f, pars, input):
         output = StringIO("")
         error = StringIO("")
         io = redirectIO(StringIO(input), output, error)
         exception = None
         value = None
         try:
-            if self.timeout != None:
-                with timeout(self.timeout):
-                    value = f(*pars)
-            else:
+            with timeout(self.timeout):
                 value = f(*pars)
         except Exception as e:
             exception = e
@@ -207,7 +223,7 @@ class executionManager:
             i = 0
             while i < len(lines):
                 l = lines[i]
-                if not '"validador.py"' in l:
+                if 'validador.py' not in l:
                     error.write(l)
                 i += 1
         finally:
@@ -215,25 +231,26 @@ class executionManager:
             restoreIO(io)
         return result
 
-def check_functions(filename, prueba, conf, em, globales):
+def check_functions(filename, prueba, conf, em):
+    original = {}
+    for k, v in em.functions.items():
+        if k != "__builtins__":
+            original[k] = copy.deepcopy(v)
+        else:
+            original[k] = v
+
     for pf in prueba.functions:
-        if pf.fname not in globales:
+        if not em.exists_function(pf.fname):
             print ("{} FALLO, no implementa la función {}.".format(filename, pf.fname))
             return False
-        original = {}
-        for k, v in globales.items():
-            if k != "__builtins__":
-                original[k] = copy.deepcopy(v)
-            else:
-                original[k] = v
         for test in pf.tests:
-            if not is_ok_function(pf.fname, test, filename, em, globales, original):
+            if not is_ok_function(pf.fname, test, filename, em, original):
                 return False
     return True
 
-def is_ok_function(fname, test, filename, em, globales, original):
+def is_ok_function(fname, test, filename, em, original):
     parsActual = copy.deepcopy(test.pars)
-    result = em.exec_function(globales[fname], parsActual, test.stdin)
+    result = em.exec_function(fname, parsActual, test.stdin)
     if result.exception != None:
         print ("{} FALLO, la función {} con {} lanza una excepción:".format(filename, fname, test.pars))
         print (result.error)
@@ -241,7 +258,7 @@ def is_ok_function(fname, test, filename, em, globales, original):
     if result.value != test.result:
         print ("{} FALLO, la función {} con {} da como resultado {} en lugar de {}".format(filename, fname, test.pars, result.value, test.result))
         return False
-    for (var, valor) in globales.items():
+    for (var, valor) in result.globals.items():
         if var not in original or valor != original[var]:
             print ("{} FALLO, la función {} asigna a la variable global {}.".format(filename, fname, var))
             return False
@@ -372,6 +389,7 @@ def at_most_len(what, description, maxlen):
 
 def at_least_len(what, description, minlen):
     if len(what) < minlen:
+        print (what)
         error("{} debería tener como mínimo {} ítems".format(description, minlen))
 
 def exact_len(what, description, expected_len):
