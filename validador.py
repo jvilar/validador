@@ -2,7 +2,7 @@
 '''
 Created on 16/07/2014
 
-@version 1.3.3 (2016-11-03)
+@version 1.3.4 (2016-11-15)
 @author: David Llorens (dllorens@uji.es)
          Federico Prat (fprat@uji.es)
          Juan Miguel Vilar (jvilar@uji.es)
@@ -68,7 +68,7 @@ def compararMatrices(expected, user):
     for fila in range(len(expected)):
         for col in range(len(expected[0])):
             if expected[fila][col] != user[fila][col]:
-                return ("En la fila {} y columna {} se ha encontrado el valor {} y se esperaba {}"
+                return ("En la fila {} y columna {} se ha encontrado el valor {} y se esperaba {}."
                          .format(fila, col, user[fila][col], expected[fila][col]))
     return None
 
@@ -77,10 +77,10 @@ def comprobarFichero(image, result, conf):
         with open(image) as f:
             expected = matriz(f.read())
     except:
-        return "No he podido abrir el fichero de pruebas {}, comprueba que exista".format(image)
+        return "No he podido abrir el fichero de pruebas {}, comprueba que exista.".format(image)
     user = result.globals["__builtins__"].get(conf.MATRIX_UJI)
     if user == None:
-        return "No se ha mostrado ninguna matriz"
+        return "No se ha mostrado ninguna matriz."
     return compararMatrices(expected, user)
 
 def posDiferencia(cad1, cad2):
@@ -249,26 +249,27 @@ def check_functions(filename, prueba, conf, em):
 def is_ok_function(fname, test, filename, em, original):
     parsActual = copy.deepcopy(test.pars)
     result = em.exec_function(fname, parsActual, test.stdin)
+    full = "{} FALLO, la función {} con parámetros {} y entrada {}".format(filename, fname, test.pars, repr(test.stdin))
     if result.exception != None:
-        print ("{} FALLO, la función {} con {} lanza una excepción:".format(filename, fname, test.pars))
+        print ("{} lanza una excepción:".format(full))
         print (result.error)
         return False
     if result.value != test.result:
-        print ("{} FALLO, la función {} con {} da como resultado {} en lugar de {}".format(filename, fname, test.pars, result.value, test.result))
+        print ("{} da como resultado {} en lugar de {}".format(full, result.value, test.result))
         return False
     for (var, valor) in result.globals.items():
         if var not in original or valor != original[var]:
-            print ("{} FALLO, la función {} asigna a la variable global {}.".format(filename, fname, var))
+            print ("{} asigna a la variable global {}.".format(full, var))
             return False
     if test.finalPars != parsActual:
-        print ("{} FALLO, la función {} no trata los parametros como se espera.".format(filename, fname))
+        print ("{} no trata los parametros como se espera.".format(full))
         for i,p in enumerate(test.finalPars):
             if p != parsActual[i]:
                 print("Al salir, el parámetro {} tenía que valer {} y vale {}".format(i + 1, p, parsActual[i]))
         return False
     hayDiferencias, encontrado, esperado = comparaSalida(result.output, test.stdout)
     if hayDiferencias:
-        print("{} FALLO, la funcion {} con {} no da la salida correcta.".format(filename, fname, test.pars))
+        print("{} no da la salida correcta.".format(full))
         prettyPrintDiferencias(encontrado, esperado)
         return False
     return True
@@ -339,7 +340,7 @@ class Resultado:
 
 
 class Configuración:
-    fields = [("VERSION", "1.3.3"),
+    fields = [("VERSION", "1.3.4"),
               ("TIMEOUT", 5), #seconds
               ("ENVIRONMENT_FLAG", "__MATRIX_GLOBAL__"),
               ("MATRIX_UJI", "__uji_matrix"),
@@ -583,7 +584,7 @@ def valida_todos(conf):
         elif resultado.todas_las_obligatorias_superadas:
             print("RESULTADO FINAL: VALIDACIÓN SUPERADA POR OBLIGATORIAS")
         elif len(resultado.not_valid_mandatory_exercices)==1:
-            print("RESULTADO FINAL: VALIDACIÓN SUPERADA POR OBLIGATORIAS, TOLERANDO 1 ejercicio ({0}) que NO supera las pruebas".format(','.join(resultado.not_valid_mandatory_exercices)))
+            print("RESULTADO FINAL: VALIDACIÓN SUPERADA POR OBLIGATORIAS, TOLERANDO un ejercicio ({0}) que NO supera las pruebas".format(','.join(resultado.not_valid_mandatory_exercices)))
         else:
             print("RESULTADO FINAL: VALIDACIÓN SUPERADA POR OBLIGATORIAS, TOLERANDO {0} ejercicios ({1}) que NO superan las pruebas".format(len(resultado.not_valid_mandatory_exercices),
                                                                                                                                             ','.join(resultado.not_valid_mandatory_exercices)))
