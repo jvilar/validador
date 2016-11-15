@@ -60,27 +60,28 @@ def matriz(datos):
         mat.append([int(n) for n in l.split()])
     return mat
 
-def compararMatrices(user, out):
+def compararMatrices(expected, user):
+    filasExpected, colsExpected = len(expected), len(expected[0])
     filasUser, colsUser = len(user), len(user[0])
-    filasOut, colsOut = len(out), len(out[0])
-    if filasUser != filasOut or colsUser != colsOut:
+    if filasExpected != filasUser or colsExpected != colsUser:
         return True, None
-    for fila in range(len(user)):
-        for col in range(len(user[0])):
-            if user[fila][col] != out[fila][col]:
-                return True, (fila, col, out[fila][col], user[fila][col])
-    return False, None
+    for fila in range(len(expected)):
+        for col in range(len(expected[0])):
+            if expected[fila][col] != user[fila][col]:
+                return ("En la fila {} y columna {} se ha encontrado el valor {} y se esperaba {}"
+                         .format(fila, col, user[fila][col], expected[fila][col]))
+    return None
 
-def comprobarFichero(conf, image):
-    resfilename = conf.RESULTDIR + image
-    with open(resfilename) as f:
-        user = matriz(f.read())
+def comprobarFichero(image, result, conf):
     try:
-        with open(conf.IMAGEFILENAME) as f:
-            out = matriz(f.read())
-    except Exception:
-        return True, None
-    return compararMatrices(user, out)
+        with open(image) as f:
+            expected = matriz(f.read())
+    except:
+        return "No he podido abrir el fichero de pruebas {}, comprueba que exista".format(image)
+    user = result.globals["__builtins__"].get(conf.MATRIX_UJI)
+    if user == None:
+        return "No se ha mostrado ninguna matriz"
+    return compararMatrices(expected, user)
 
 def posDiferencia(cad1, cad2):
     if len(cad1) > len(cad2):
@@ -105,24 +106,21 @@ def prettyPrintDiferencias(encontrado, esperado):
         print(encontrado)
         print()
 
-def checkOutput(filename, prueba, res, conf):
+def checkOutput(filename, prueba, result, conf):
     if len(prueba.input)>0 and prueba.input[-1]=="\n":
         entrada = prueba.input[:-1].split("\n")
     else:
         entrada = prueba.input.split("\n")
-    hayDiferencias, encontrado, esperado = comparaSalida(res, prueba.output)
+    hayDiferencias, encontrado, esperado = comparaSalida(result.output, prueba.output)
     if hayDiferencias:
         print("{0} FALLO para entrada {1}.".format(filename, entrada))
         prettyPrintDiferencias(encontrado, esperado)
     ficherosDistintos = False
     if prueba.image != None:
-        ficherosDistintos,  posicion = comprobarFichero(prueba.image, conf)
-        if ficherosDistintos:
-            if posicion == None:
-                print("{0} FALLO para entrada {1}. Las dimensiones de la imagen resultado no coinciden con las esperadas".format(filename, entrada))
-            else:
-                fila, columna, encontrado, esperado = posicion
-                print("{0} FALLO para entrada {1}. En la fila {2} y columna {3} se ha encontrado el valor {4} y se esperaba {5}".format(filename, entrada, fila, columna, encontrado, esperado))
+        mensaje = comprobarFichero(prueba.image, result, conf)
+        if mensaje != None:
+            print("{} FALLO para entrada {}. {}".format(filename, entrada, mensaje))
+            ficherosDistintos = True
     return not (hayDiferencias or ficherosDistintos)
 
 def do_test(filename, em, prueba, conf):
@@ -142,7 +140,7 @@ def do_test(filename, em, prueba, conf):
         print("{0} FALLO para entrada {1}. Salida de error:".format(filename, prueba.input.split()))
         print(result.error)
         return False
-    return checkOutput(filename, prueba, result.output, conf)
+    return checkOutput(filename, prueba, result, conf)
 
 def redirectIO (input, output, error):
     stdin, stdout, stderr = sys.stdin, sys.stdout, sys.stderr
@@ -343,8 +341,8 @@ class Resultado:
 class Configuración:
     fields = [("VERSION", "1.3.3"),
               ("TIMEOUT", 5), #seconds
-              ("RESULTDIR", "resultados/"),
-              ("IMAGEFILENAME", ".imagen.txt"),
+              ("ENVIRONMENT_FLAG", "__MATRIX_GLOBAL__"),
+              ("MATRIX_UJI", "__uji_matrix"),
               ("NUM_PRACTICA", -1),
               ("work", []),
               ("CREATE_ZIP", True),
@@ -550,7 +548,7 @@ def genera_ficheros(conf):
 
 def valida_uno(conf, nombre):
     print("\nProbando:")
-    os.environ['__VALIDADORACTIVATED'] = 'True'
+    os.environ[conf.ENVIRONMENT_FLAG] = 'TRUE'
     resultado = Resultado()
     for ejercicio in conf.ejercicios:
         if ejercicio.nombre == nombre:
@@ -558,7 +556,7 @@ def valida_uno(conf, nombre):
             return
 
 def valida_todos(conf):
-    os.environ['__VALIDADORACTIVATED'] = 'True'
+    os.environ[conf.ENVIRONMENT_FLAG] = 'TRUE'
     resultado = validacion(conf)
 
     # Muestra la lista de ejercicios vacíos o que no existe el fichero
