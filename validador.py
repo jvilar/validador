@@ -2,7 +2,7 @@
 '''
 Created on 16/07/2014
 
-@version 1.3.4 (2016-11-15)
+@version 1.3.5 (2016-11-29)
 @author: David Llorens (dllorens@uji.es)
          Federico Prat (fprat@uji.es)
          Juan Miguel Vilar (jvilar@uji.es)
@@ -123,25 +123,6 @@ def checkOutput(filename, prueba, result, conf):
             ficherosDistintos = True
     return not (hayDiferencias or ficherosDistintos)
 
-def do_test(filename, em, prueba, conf):
-    if prueba.functions != None:
-        isOk = check_functions(filename, prueba, conf, em)
-        if not isOk:
-            return False
-    result = em.exec_program(prueba.input)
-    if result.exception != None:
-        if not conf.TIMEOUT is None and isinstance (result.exception, TimeoutError):
-            print("{0} TIMEOUT para entrada {1}.".format(filename, prueba.input.split()))
-        else:
-            print("{0} FALLO para entrada {1}. Lanzada excepción:".format(filename, prueba.input.split()))
-            print(result.error)
-        return False
-    if result.error != "":
-        print("{0} FALLO para entrada {1}. Salida de error:".format(filename, prueba.input.split()))
-        print(result.error)
-        return False
-    return checkOutput(filename, prueba, result, conf)
-
 def redirectIO (input, output, error):
     stdin, stdout, stderr = sys.stdin, sys.stdout, sys.stderr
     sys.stdin, sys.stdout, sys.stderr = input, output, error
@@ -188,25 +169,25 @@ class executionManager:
         decls = [ node for node in tree.body if node.__class__.__name__
                     in [ "FunctionDef", "ImportFrom", "Import", "ClassDef", "AsyncFunctionDef"] ]
         declarations = compile(ast.Module(body = decls, lineno = 0, col_offset = 0), filename, "exec")
-        self.functions = {}
-        result = self._do_exec(exec, (declarations, self.functions), "sd")
+        self.globals = {}
+        result = self.do_exec(exec, (declarations, self.globals), "sd")
 
     def exec_program(self, input):
         globals = {}
-        result = self._do_exec(exec, (self.prg, globals), input)
+        result = self.do_exec(exec, (self.prg, globals), input)
         result.globals = globals
         return result
 
     def exists_function(self, fname):
-        return fname in self.functions
+        return fname in self.globals
 
     def exec_function(self, fname, pars, input):
-        f = self.functions[fname]
-        result = self._do_exec(f, pars, input)
-        result.globals = self.functions
+        f = self.globals[fname]
+        result = self.do_exec(f, pars, input)
+        result.globals = self.globals
         return result
 
-    def _do_exec(self, f, pars, input):
+    def do_exec(self, f, pars, input):
         output = StringIO("")
         error = StringIO("")
         io = redirectIO(StringIO(input), output, error)
@@ -228,51 +209,6 @@ class executionManager:
             result = executionResult(value = value, output = output.getvalue(), error = error.getvalue(), exception = exception)
             restoreIO(io)
         return result
-
-def check_functions(filename, prueba, conf, em):
-    original = {}
-    for k, v in em.functions.items():
-        if k != "__builtins__":
-            original[k] = copy.deepcopy(v)
-        else:
-            original[k] = v
-
-    for pf in prueba.functions:
-        if not em.exists_function(pf.fname):
-            print ("{} FALLO, no implementa la función {}.".format(filename, pf.fname))
-            return False
-        for test in pf.tests:
-            if not is_ok_function(pf.fname, test, filename, em, original):
-                return False
-    return True
-
-def is_ok_function(fname, test, filename, em, original):
-    parsActual = copy.deepcopy(test.pars)
-    result = em.exec_function(fname, parsActual, test.stdin)
-    full = "{} FALLO, la función {} con parámetros {} y entrada {}".format(filename, fname, test.pars, repr(test.stdin))
-    if result.exception != None:
-        print ("{} lanza una excepción:".format(full))
-        print (result.error)
-        return False
-    if result.value != test.result:
-        print ("{} da como resultado {} en lugar de {}".format(full, result.value, test.result))
-        return False
-    for (var, valor) in result.globals.items():
-        if var not in original or valor != original[var]:
-            print ("{} asigna a la variable global {}.".format(full, var))
-            return False
-    if test.finalPars != parsActual:
-        print ("{} no trata los parametros como se espera.".format(full))
-        for i,p in enumerate(test.finalPars):
-            if p != parsActual[i]:
-                print("Al salir, el parámetro {} tenía que valer {} y vale {}".format(i + 1, p, parsActual[i]))
-        return False
-    hayDiferencias, encontrado, esperado = comparaSalida(result.output, test.stdout)
-    if hayDiferencias:
-        print("{} no da la salida correcta.".format(full))
-        prettyPrintDiferencias(encontrado, esperado)
-        return False
-    return True
 
 def esta_implementado(fichero):
     return os.path.isfile(fichero) and os.stat(fichero).st_size > 0
@@ -296,7 +232,7 @@ def prueba_ejercicio(conf, ejercicio, resultado):
     isOk = True
     em = executionManager(filename, conf.TIMEOUT)
     for prueba in ejercicio.pruebas:
-        isOk = do_test(filename, em, prueba, conf)
+        isOk = prueba.do_test(filename, em, conf)
         if not isOk:
             break
     if isOk:
@@ -340,7 +276,7 @@ class Resultado:
 
 
 class Configuración:
-    fields = [("VERSION", "1.3.4"),
+    fields = [("VERSION", "1.3.5"),
               ("TIMEOUT", 5), #seconds
               ("ENVIRONMENT_FLAG", "__MATRIX_GLOBAL__"),
               ("MATRIX_UJI", "__uji_matrix"),
@@ -403,10 +339,15 @@ class Ejercicio:
             self.nombre = entrada[0]
         except:
             error("No puedo leer el primer elemento de {}".format(desc))
-        self.pruebas = [Prueba(p, self.nombre, i) for i, p in enumerate(entrada[-1])]
+        self.pruebas = []
+        for i, p in enumerate(entrada[-1]):
+            if isinstance(p, ObjectTest):
+                self.pruebas.append(p)
+            else:
+                self.pruebas.append(ProgramTest(p, self.nombre, i))
         self.obligatorio = len(entrada) == 2 or entrada[1]
 
-class Prueba:
+class ProgramTest:
     def __init__(self, entrada, pname, i):
         desc = "la prueba {} del programa {}".format(i, pname)
         has_len_and_items(entrada, desc)
@@ -424,6 +365,38 @@ class Prueba:
             is_iterable(entrada[3], "las pruebas de función de " + desc)
         self.functions = [ FunctionTestList(ftl, pname, j) for j, ftl in enumerate(entrada[3]) ] if len(entrada) > 3 else None
 
+    def do_test(self, filename, em, conf):
+        if self.functions != None:
+            isOk = self.check_functions(filename, conf, em)
+            if not isOk:
+                return False
+        result = em.exec_program(self.input)
+        if result.exception != None:
+            if not conf.TIMEOUT is None and isinstance (result.exception, TimeoutError):
+                print("{0} TIMEOUT para entrada {1}.".format(filename, self.input.split()))
+            else:
+                print("{0} FALLO para entrada {1}. Lanzada excepción:".format(filename, self.input.split()))
+                print(result.error)
+            return False
+        if result.error != "":
+            print("{0} FALLO para entrada {1}. Salida de error:".format(filename, self.input.split()))
+            print(result.error)
+            return False
+        return checkOutput(filename, self, result, conf)
+
+    def check_functions(self, filename, conf, em):
+        original = {}
+        for k, v in em.functions.items():
+            if k != "__builtins__":
+                original[k] = copy.deepcopy(v)
+            else:
+                original[k] = v
+
+        for pf in self.functions:
+            if not pf.do_test(filename, em, original):
+                return False
+        return True
+
 class FunctionTestList:
     def __init__(self, entrada, pname, j):
         desc = "la prueba {} de función del programa {}".format(j, pname)
@@ -431,6 +404,15 @@ class FunctionTestList:
         exact_len(entrada, desc, 2)
         self.fname = entrada[0]
         self.tests = [ FunctionTest(ft, pname, self.fname, i) for i, ft in enumerate(entrada[1]) ]
+
+    def do_test(self, filename, em, original):
+        if not em.exists_function(self.fname):
+            print ("{} FALLO, no implementa la función {}.".format(filename, self.fname))
+            return False
+        for test in self.tests:
+            if not test.do_test(self.fname, filename, em, original):
+                return False
+        return True
 
 class FunctionTest:
     def __init__(self, entrada, pname, fname, i):
@@ -442,6 +424,123 @@ class FunctionTest:
         self.result = entrada[2]
         self.finalPars = entrada[3]
         self.stdout = entrada[4]
+
+    def do_test(self, fname, filename, em, original):
+        parsActual = copy.deepcopy(self.pars)
+        result = em.exec_function(fname, parsActual, self.stdin)
+        full = "{} FALLO, la función {} con parámetros {} y entrada {}".format(filename, fname, self.pars, repr(self.stdin))
+        if result.exception != None:
+            print ("{} lanza una excepción:".format(full))
+            print (result.error)
+            return False
+        if result.value != self.result:
+            print ("{} da como resultado {} en lugar de {}".format(full, result.value, self.result))
+            return False
+        for (var, valor) in result.globals.items():
+            if var not in original or valor != original[var]:
+                print ("{} asigna a la variable global {}.".format(full, var))
+                return False
+        if self.finalPars != parsActual:
+            print ("{} no trata los parametros como se espera.".format(full))
+            for i,p in enumerate(self.finalPars):
+                if p != parsActual[i]:
+                    print("Al salir, el parámetro {} tenía que valer {} y vale {}".format(i + 1, p, parsActual[i]))
+            return False
+        hayDiferencias, encontrado, esperado = comparaSalida(result.output, self.stdout)
+        if hayDiferencias:
+            print("{} no da la salida correcta.".format(full))
+            prettyPrintDiferencias(encontrado, esperado)
+            return False
+        return True
+
+class ObjectTest:
+    def __init__(self, oname, pars, tests):
+        self.oname = oname
+        self.pars = pars
+        self.tests = tests
+
+    def do_test(self, filename, em, conf):
+        full = "{} FALLO, el constructor de {} con parámetros {}".format(filename, self.oname, self.pars)
+
+        original = {}
+        for k, v in em.globals.items():
+            if k != "__builtins__":
+                original[k] = copy.deepcopy(v)
+            else:
+                original[k] = v
+
+        parsActual = copy.deepcopy(self.pars)
+        if not em.exists_function(self.oname):
+            print ("{} no existe la clase {}".format(filename, self.oname))
+            return False
+
+        result = em.exec_function(self.oname, parsActual, "")
+
+        if result.exception != None:
+            print ("{} lanza una excepción:".format(full))
+            print (result.error)
+            return False
+        for (var, valor) in result.globals.items():
+            if var not in original or valor != original[var]:
+                print ("{} asigna a la variable global {}.".format(full, var))
+                return False
+        if self.pars != parsActual:
+            print ("{} no trata los parametros como se espera.".format(full))
+            for i,p in enumerate(self.pars):
+                if p != parsActual[i]:
+                    print("Al salir, el parámetro {} tenía que valer {} y vale {}".format(i + 1, p, parsActual[i]))
+            return False
+        if result.output != "":
+            print("{} escribe en la salida estándar y no debería.".format(full))
+            return False
+
+        obj = result.value
+        for mt in self.tests:
+            if not mt.do_test(filename, em, conf, obj, original):
+                return False
+        return True
+
+class MethodTest:
+    def __init__(self, mname, pars, stdin, result, finalPars, stdout):
+        self.mname = mname
+        self.pars = pars
+        self.stdin = stdin
+        self.result = result
+        self.finalPars = finalPars
+        self.stdout = stdout
+
+    def do_test(self, filename, em, conf, obj, original):
+        parsActual = copy.deepcopy(self.pars)
+        clase = obj.__class__.__name__
+        if not hasattr(obj, self.mname):
+            print("{} la clase {} no tiene método {}".format(filename, clase, self.mname))
+            return False
+        full = "{} FALLO, el método {} de la clase {} con parámetros {} y entrada {}".format(
+            filename, self.mname, clase , self.pars, repr(self.stdin))
+        result = em.do_exec(getattr(obj, self.mname), parsActual, self.stdin)
+        if result.exception != None:
+            print ("{} lanza una excepción:".format(full))
+            print (result.error)
+            return False
+        if result.value != self.result:
+            print ("{} da como resultado {} en lugar de {}".format(full, result.value, self.result))
+            return False
+        for (var, valor) in em.globals.items():
+            if var not in original or valor != original[var]:
+                print ("{} asigna a la variable global {}.".format(full, var))
+                return False
+        if self.finalPars != parsActual:
+            print ("{} no trata los parametros como se espera.".format(full))
+            for i,p in enumerate(self.finalPars):
+                if p != parsActual[i]:
+                    print("Al salir, el parámetro {} tenía que valer {} y vale {}".format(i + 1, p, parsActual[i]))
+            return False
+        hayDiferencias, encontrado, esperado = comparaSalida(result.output, self.stdout)
+        if hayDiferencias:
+            print("{} no da la salida correcta.".format(full))
+            prettyPrintDiferencias(encontrado, esperado)
+            return False
+        return True
 
 def lee_configuración():
     # busca el fichero de configuración del validador
@@ -458,10 +557,12 @@ def lee_configuración():
     except Exception as e:
         error("Fichero '{0}' no encontrado o no pudo abrirse".format(conf_file))
 
-    variables = { "MANDATORY": True, # Usadas para marcar los ficheros
-                  "OPTIONAL": False
+    variables = { "MANDATORY": True,
+                  "OPTIONAL": False,
+                  "ObjectTest" : ObjectTest,
+                  "MethodTest" : MethodTest
             }
-    # aplica (ejecuta) la coonfiguración
+
     try:
         exec(conf, variables)
     except Exception as e:
