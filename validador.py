@@ -494,9 +494,10 @@ class ObjectTest:
             print("{} escribe en la salida estándar y no debería.".format(full))
             return False
 
+        history = ["{}{}".format(self.oname, self.pars)]
         obj = result.value
         for mt in self.tests:
-            if not mt.do_test(filename, em, conf, obj, original):
+            if not mt.do_test(filename, em, conf, obj, original, history):
                 return False
         return True
 
@@ -509,14 +510,15 @@ class MethodTest:
         self.finalPars = finalPars
         self.stdout = stdout
 
-    def do_test(self, filename, em, conf, obj, original):
+    def do_test(self, filename, em, conf, obj, original, history):
         parsActual = copy.deepcopy(self.pars)
         clase = obj.__class__.__name__
         if not hasattr(obj, self.mname):
             print("{} la clase {} no tiene método {}".format(filename, clase, self.mname))
             return False
-        full = "{} FALLO, el método {} de la clase {} con parámetros {} y entrada {}".format(
-            filename, self.mname, clase , self.pars, repr(self.stdin))
+        history.append("{}{}".format(self.mname, self.pars))
+        full = "{} FALLO, la clase {} tras hacer las llamadas\n    {}\ny con entrada {}".format(
+            filename, clase, "\n    ".join(history), repr(self.stdin))
         result = em.do_exec(getattr(obj, self.mname), parsActual, self.stdin)
         if result.exception != None:
             print ("{} lanza una excepción:".format(full))
