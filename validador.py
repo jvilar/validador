@@ -1,4 +1,4 @@
-#!/bin/env python
+#!/usr/bin/env python
 '''
 Created on 16/07/2014
 
@@ -60,6 +60,45 @@ def matriz(datos):
         mat.append([int(n) for n in l.split()])
     return mat
 
+def leeLíneas(nombre):
+    with open(nombre) as f:
+        return f.readlines()
+
+def sing_pl(n, sing, pl):
+    if n == 1:
+        return sing
+    else:
+        return pl.format(n)
+
+def compararFicheros(expected, user):
+    try:
+        userLines = leeLíneas(user)
+    except:
+        return "Error leyendo el fichero {}".format(user)
+    try:
+        expectedLines = leeLíneas(expected)
+    except:
+        return "Error leyendo el fichero de pruebas {}, comprueba que existe.".format(user)
+    luser = len(userLines)
+    lexpected = len(expectedLines)
+    for i in range(min(luser, lexpected)):
+        if userLines[i] != expectedLines[i]:
+            return ("La línea {} del fichero {} no coincide con lo esperado."
+                    " Es:\n{}\ny debería ser:\n{}").format(i+1, user, userLines[i], expectedLines[i])
+    if luser < lexpected:
+        return "En el fichero {} {}".format(user,
+                                            sing_pl (lexpected - luser,
+                                                     "falta la última línea.",
+                                                     "faltan las {} últimas líneas.")
+                                            )
+    elif luser > lexpected:
+        return "En el fichero {} hay {} de más.".format(user,
+                                                        sing_pl(luser - lexpected,
+                                                                "una línea",
+                                                                "{} líneas")
+                                                        )
+    return None
+
 def compararMatrices(expected, user):
     filasExpected, colsExpected = len(expected), len(expected[0])
     filasUser, colsUser = len(user), len(user[0])
@@ -72,12 +111,12 @@ def compararMatrices(expected, user):
                          .format(fila, col, user[fila][col], expected[fila][col]))
     return None
 
-def comprobarFichero(image, result, conf):
+def comprobarMatriz(image, result, conf):
     try:
         with open(image) as f:
             expected = matriz(f.read())
     except:
-        return "No he podido abrir el fichero de pruebas {}, comprueba que exista.".format(image)
+        return "No he podido abrir el fichero de pruebas {}, comprueba que existe.".format(image)
     user = result.globals["__builtins__"].get(conf.MATRIX_UJI)
     if user == None:
         return "No se ha mostrado ninguna matriz."
@@ -98,30 +137,17 @@ def prettyPrintDiferencias(encontrado, esperado):
         print(" "*(posDiferencia(esperado,encontrado)+15)+"**^**")
         print()
     elif esperado!= None:
-        print("La salida no está completa. Faltan las siguientes líneas: ")
+        print("La salida no está completa. {}".format(
+                           sing_pl(len(esperado), "Falta esta línea:",
+                                   "Faltan las siguientes líneas:")))
         print(esperado)
         print()
     else:
-        print("Hay más líneas de las esperadas. Sobran las siguientes líneas: ")
+        print("Hay más líneas de las esperadas. {}".format(
+                           sing_pl(len(encontrado), "Sobra esta línea:",
+                                   "Sobran las siguientes líneas:")))
         print(encontrado)
         print()
-
-def checkOutput(filename, prueba, result, conf):
-    if len(prueba.input)>0 and prueba.input[-1]=="\n":
-        entrada = prueba.input[:-1].split("\n")
-    else:
-        entrada = prueba.input.split("\n")
-    hayDiferencias, encontrado, esperado = comparaSalida(result.output, prueba.output)
-    if hayDiferencias:
-        print("{0} FALLO para entrada {1}.".format(filename, entrada))
-        prettyPrintDiferencias(encontrado, esperado)
-    ficherosDistintos = False
-    if prueba.image != None:
-        mensaje = comprobarFichero(prueba.image, result, conf)
-        if mensaje != None:
-            print("{} FALLO para entrada {}. {}".format(filename, entrada, mensaje))
-            ficherosDistintos = True
-    return not (hayDiferencias or ficherosDistintos)
 
 def redirectIO (input, output, error):
     stdin, stdout, stderr = sys.stdin, sys.stdout, sys.stderr
@@ -164,7 +190,13 @@ class executionManager:
         self.timeout = timeout
         source = open(filename, encoding="utf-8").read()
         self.filename = filename
-        self.prg = compile(source, filename, "exec")
+        result = self.do_exec(compile, (source, filename, "exec"), "")
+        if result.error != "":
+            self.error = result.error
+            self.isOk = False
+            return
+        self.isOk = True
+        self.prg = result.value
         tree = ast.parse(source, filename, "exec")
         decls = [ node for node in tree.body if node.__class__.__name__
                     in [ "FunctionDef", "ImportFrom", "Import", "ClassDef", "AsyncFunctionDef"] ]
@@ -227,16 +259,20 @@ def prueba_ejercicio(conf, ejercicio, resultado):
         resultado.add_not_implemented(filename, ejercicio.obligatorio)
         return
     if ejercicio.pruebas == []:
-        print("{0} no tiene pruebas (compruébalo manualmente)".format(filename))
+        print("{} no tiene pruebas (compruébalo manualmente)".format(filename))
         return
     isOk = True
     em = executionManager(filename, conf.TIMEOUT)
-    for prueba in ejercicio.pruebas:
-        isOk = prueba.do_test(filename, em, conf)
-        if not isOk:
-            break
+    if em.isOk:
+        for prueba in ejercicio.pruebas:
+            isOk = prueba.do_test(filename, em, conf)
+            if not isOk:
+                break
+    else:
+        isOk = False
+        print ("{} no puede compilarse. Error:\n{}".format(filename, em.error))
     if isOk:
-        print("{0} pasa las pruebas".format(filename))
+        print("{} pasa las pruebas".format(filename))
     else:
         resultado.add_not_valid(filename, ejercicio.obligatorio)
 
@@ -310,27 +346,6 @@ def has_len_and_items(what, description):
     if not hasattr(what, "__len__"):
         error(description + " no es del tipo adecuado, no tiene __len__")
 
-def is_string(what, description):
-    if not isinstance(what, str):
-        error(description + " no es una cadena")
-
-def is_iterable(what, description):
-    if not hasattr(what, "__iter__"):
-        error(description + " no es iterable")
-
-def at_most_len(what, description, maxlen):
-    if len(what) > maxlen:
-        error("{} debería tener como máximo {} ítems".format(description, maxlen))
-
-def at_least_len(what, description, minlen):
-    if len(what) < minlen:
-        print (what)
-        error("{} debería tener como mínimo {} ítems".format(description, minlen))
-
-def exact_len(what, description, expected_len):
-    if len(what) != expected_len:
-        error("{} debería tener {} ítems".format(description, expected_len))
-
 class Ejercicio:
     def __init__(self, entrada, n):
         desc = "la entrada {} de la lista work".format(n)
@@ -339,31 +354,17 @@ class Ejercicio:
             self.nombre = entrada[0]
         except:
             error("No puedo leer el primer elemento de {}".format(desc))
-        self.pruebas = []
-        for i, p in enumerate(entrada[-1]):
-            if isinstance(p, ObjectTest):
-                self.pruebas.append(p)
-            else:
-                self.pruebas.append(ProgramTest(p, self.nombre, i))
+        self.pruebas = entrada[-1]
         self.obligatorio = len(entrada) == 2 or entrada[1]
 
 class ProgramTest:
-    def __init__(self, entrada, pname, i):
-        desc = "la prueba {} del programa {}".format(i, pname)
-        has_len_and_items(entrada, desc)
-        at_least_len(entrada, desc, 2)
-        at_most_len(entrada, desc, 4)
-
-        is_string(entrada[0], "la entrada de " + desc)
-        self.input = entrada[0]
-        is_string(entrada[1], "la salida de " + desc)
-        self.output = entrada[1]
-        if len(entrada) > 2 and not entrada[2] is None:
-            is_string(entrada[2], "la imagen de " + desc)
-        self.image = entrada[2] if len(entrada) > 2 else None
-        if len(entrada) > 3:
-            is_iterable(entrada[3], "las pruebas de función de " + desc)
-        self.functions = [ FunctionTestList(ftl, pname, j) for j, ftl in enumerate(entrada[3]) ] if len(entrada) > 3 else None
+    def __init__(self, input, output, image = None, outputFile = None, refFile = None, functions = None):
+        self.input = input
+        self.output = output
+        self.image = image
+        self.outputFile = outputFile
+        self.refFile = refFile
+        self.functions = functions
 
     def do_test(self, filename, em, conf):
         if self.functions != None:
@@ -382,11 +383,34 @@ class ProgramTest:
             print("{0} FALLO para entrada {1}. Salida de error:".format(filename, self.input.split()))
             print(result.error)
             return False
-        return checkOutput(filename, self, result, conf)
+        return self.check_output(filename, result, conf)
+
+    def check_output(self, filename, result, conf):
+        if len(self.input)>0 and self.input[-1]=="\n":
+            entrada = self.input[:-1].split("\n")
+        else:
+            entrada = self.input.split("\n")
+        hayDiferencias, encontrado, esperado = comparaSalida(result.output, self.output)
+        if hayDiferencias:
+            print("{0} FALLO para entrada {1}.".format(filename, entrada))
+            prettyPrintDiferencias(encontrado, esperado)
+            return False
+        ficherosDistintos = False
+        if self.image != None:
+            mensaje = comprobarMatriz(self.image, result, conf)
+            if mensaje != None:
+                print("{} FALLO para entrada {}. {}".format(filename, entrada, mensaje))
+                return False
+        if self.outputFile != None:
+            mensaje = compararFicheros(self.refFile, self.outputFile)
+            if mensaje != None:
+                print("{} FALLO para entrada {}. {}".format(filename, entrada, mensaje))
+                return False
+        return True
 
     def check_functions(self, filename, conf, em):
         original = {}
-        for k, v in em.functions.items():
+        for k, v in em.globals.items():
             if k != "__builtins__":
                 original[k] = copy.deepcopy(v)
             else:
@@ -398,12 +422,9 @@ class ProgramTest:
         return True
 
 class FunctionTestList:
-    def __init__(self, entrada, pname, j):
-        desc = "la prueba {} de función del programa {}".format(j, pname)
-        has_len_and_items(entrada, desc)
-        exact_len(entrada, desc, 2)
-        self.fname = entrada[0]
-        self.tests = [ FunctionTest(ft, pname, self.fname, i) for i, ft in enumerate(entrada[1]) ]
+    def __init__(self, fname, tests):
+        self.fname = fname
+        self.tests = tests
 
     def do_test(self, filename, em, original):
         if not em.exists_function(self.fname):
@@ -415,15 +436,12 @@ class FunctionTestList:
         return True
 
 class FunctionTest:
-    def __init__(self, entrada, pname, fname, i):
-        desc = "la prueba {} de la función {} del programa {}".format(i, fname, pname)
-        has_len_and_items(entrada, desc)
-        exact_len(entrada, desc, 5)
-        self.pars = entrada[0]
-        self.stdin = entrada[1]
-        self.result = entrada[2]
-        self.finalPars = entrada[3]
-        self.stdout = entrada[4]
+    def __init__(self, pars, stdin, result, finalPars, stdout):
+        self.pars = pars
+        self.stdin = stdin
+        self.result = result
+        self.finalPars = finalPars
+        self.stdout = stdout
 
     def do_test(self, fname, filename, em, original):
         parsActual = copy.deepcopy(self.pars)
@@ -488,7 +506,7 @@ class ObjectTest:
             print ("{} no trata los parametros como se espera.".format(full))
             for i,p in enumerate(self.pars):
                 if p != parsActual[i]:
-                    print("Al salir, el parámetro {} tenía que valer {} y vale {}".format(i + 1, p, parsActual[i]))
+                    print("Al salir, el parámetro {} tenía que valer {} y vale {}".format(i + 1, repr(p), repr(parsActual[i])))
             return False
         if result.output != "":
             print("{} escribe en la salida estándar y no debería.".format(full))
@@ -517,15 +535,16 @@ class MethodTest:
             print("{} la clase {} no tiene método {}".format(filename, clase, self.mname))
             return False
         history.append("{}{}".format(self.mname, self.pars))
-        full = "{} FALLO, la clase {} tras hacer las llamadas\n    {}\ny con entrada {}".format(
-            filename, clase, "\n    ".join(history), repr(self.stdin))
+        full = "{} FALLO, la clase {} tras hacer {}\n    {}\ny con entrada {}".format(
+            filename, clase, sing_pl(len(history), "la llamada", "las llamadas"),
+            "\n    ".join(history), repr(self.stdin))
         result = em.do_exec(getattr(obj, self.mname), parsActual, self.stdin)
         if result.exception != None:
             print ("{} lanza una excepción:".format(full))
             print (result.error)
             return False
         if result.value != self.result:
-            print ("{} da como resultado {} en lugar de {}".format(full, result.value, self.result))
+            print ("{} da como resultado {} en lugar de {}".format(full, repr(result.value), repr(self.result)))
             return False
         for (var, valor) in em.globals.items():
             if var not in original or valor != original[var]:
@@ -535,7 +554,7 @@ class MethodTest:
             print ("{} no trata los parametros como se espera.".format(full))
             for i,p in enumerate(self.finalPars):
                 if p != parsActual[i]:
-                    print("Al salir, el parámetro {} tenía que valer {} y vale {}".format(i + 1, p, parsActual[i]))
+                    print("Al salir, el parámetro {} tenía que valer {} y vale {}".format(i + 1, repr(p), repr(parsActual[i])))
             return False
         hayDiferencias, encontrado, esperado = comparaSalida(result.output, self.stdout)
         if hayDiferencias:
@@ -562,7 +581,10 @@ def lee_configuración():
     variables = { "MANDATORY": True,
                   "OPTIONAL": False,
                   "ObjectTest" : ObjectTest,
-                  "MethodTest" : MethodTest
+                  "MethodTest" : MethodTest,
+                  "ProgramTest" : ProgramTest,
+                  "FunctionTest" : FunctionTest,
+                  "FunctionTestList" : FunctionTestList
             }
 
     try:
