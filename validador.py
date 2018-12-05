@@ -2,10 +2,12 @@
 '''
 Created on 16/07/2014
 
-@version 1.3.5 (2016-11-29)
+@version 1.3.6 (2018-12-05)
 @author: David Llorens (dllorens@uji.es)
          Federico Prat (fprat@uji.es)
          Juan Miguel Vilar (jvilar@uji.es)
+
+@maintainer: Juan Miguel Vilar (jvilar@uji.es)
 
 Comprobador simple de programas
 -------------------------------
@@ -35,6 +37,14 @@ def error(m):
 
 def clean(s):
     return " ".join(s.strip().lower().split())
+
+def my_deepcopy(v):
+    """Perform a deep copy if v is not a module, else return it
+    untouched"""
+    if type(v) != type(sys):
+        return copy.deepcopy(v)
+    else:
+        return v
 
 def comparaSalida(user, out):
     lineasUser = [ clean(l) for l in user.split("\n") if l.strip()!="" ]
@@ -312,7 +322,7 @@ class Resultado:
 
 
 class Configuración:
-    fields = [("VERSION", "1.3.5"),
+    fields = [("VERSION", "1.3.6"),
               ("TIMEOUT", 5), #seconds
               ("ENVIRONMENT_FLAG", "__MATRIX_GLOBAL__"),
               ("MATRIX_UJI", "__uji_matrix"),
@@ -374,7 +384,7 @@ class ProgramTest:
         result = em.exec_program(self.input)
         if result.exception != None:
             if not conf.TIMEOUT is None and isinstance (result.exception, TimeoutError):
-                print("{0} TIMEOUT para entrada {1}.".format(filename, self.input.split()))
+                print("{0} lanza un TIMEOUT (tarda mucho en ejecutarse) para entrada {1}.".format(filename, self.input.split()))
             else:
                 print("{0} FALLO para entrada {1}. Lanzada excepción:".format(filename, self.input.split()))
                 print(result.error)
@@ -411,8 +421,8 @@ class ProgramTest:
     def check_functions(self, filename, conf, em):
         original = {}
         for k, v in em.globals.items():
-            if k != "__builtins__":
-                original[k] = copy.deepcopy(v)
+            if k != '__builtins__':
+                original[k] = my_deepcopy(v)
             else:
                 original[k] = v
 
@@ -444,12 +454,15 @@ class FunctionTest:
         self.stdout = stdout
 
     def do_test(self, fname, filename, em, original):
-        parsActual = copy.deepcopy(self.pars)
+        parsActual = my_deepcopy(self.pars)
         result = em.exec_function(fname, parsActual, self.stdin)
         full = "{} FALLO, la función {} con parámetros {} y entrada {}".format(filename, fname, self.pars, repr(self.stdin))
         if result.exception != None:
-            print ("{} lanza una excepción:".format(full))
-            print (result.error)
+            if isinstance (result.exception, TimeoutError):
+                print("{} provoca un TIMEOUT (tarda mucho tiempo en ejecutarse).".format(full))
+            else:
+                print ("{} lanza una excepción:".format(full))
+                print (result.error)
             return False
         if result.value != self.result:
             print ("{} da como resultado {} en lugar de {}".format(full, result.value, self.result))
@@ -483,11 +496,11 @@ class ObjectTest:
         original = {}
         for k, v in em.globals.items():
             if k != "__builtins__":
-                original[k] = copy.deepcopy(v)
+                original[k] = my_deepcopy(v)
             else:
                 original[k] = v
 
-        parsActual = copy.deepcopy(self.pars)
+        parsActual = my_deepcopy(self.pars)
         if not em.exists_function(self.oname):
             print ("{} no existe la clase {}".format(filename, self.oname))
             return False
@@ -529,7 +542,7 @@ class MethodTest:
         self.stdout = stdout
 
     def do_test(self, filename, em, conf, obj, original, history):
-        parsActual = copy.deepcopy(self.pars)
+        parsActual = my_deepcopy(self.pars)
         clase = obj.__class__.__name__
         if not hasattr(obj, self.mname):
             print("{} la clase {} no tiene método {}".format(filename, clase, self.mname))
