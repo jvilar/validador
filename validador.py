@@ -2,7 +2,7 @@
 '''
 Created on 16/07/2014
 
-@version 1.3.6 (2018-12-05)
+@version 1.3.7 (2018-12-05)
 @author: David Llorens (dllorens@uji.es)
          Federico Prat (fprat@uji.es)
          Juan Miguel Vilar (jvilar@uji.es)
@@ -208,11 +208,11 @@ class executionManager:
         self.isOk = True
         self.prg = result.value
         tree = ast.parse(source, filename, "exec")
-        decls = [ node for node in tree.body if node.__class__.__name__
+        tree.body = [ node for node in tree.body if node.__class__.__name__
                     in [ "FunctionDef", "ImportFrom", "Import", "ClassDef", "AsyncFunctionDef"] ]
-        declarations = compile(ast.Module(body = decls, lineno = 0, col_offset = 0), filename, "exec")
+        declarations = compile(tree, filename, "exec")
         self.globals = {}
-        result = self.do_exec(exec, (declarations, self.globals), "sd")
+        result = self.do_exec(exec, (declarations, self.globals), "")
 
     def exec_program(self, input):
         globals = {}
@@ -322,7 +322,7 @@ class Resultado:
 
 
 class Configuración:
-    fields = [("VERSION", "1.3.6"),
+    fields = [("VERSION", "1.3.7"),
               ("TIMEOUT", 5), #seconds
               ("ENVIRONMENT_FLAG", "__MATRIX_GLOBAL__"),
               ("MATRIX_UJI", "__uji_matrix"),
