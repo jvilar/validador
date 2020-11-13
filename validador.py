@@ -238,6 +238,8 @@ class executionManager:
         try:
             with timeout(self.timeout):
                 value = f(*pars)
+        except SystemExit:
+            pass
         except Exception as e:
             exception = e
             lines = traceback.format_exception(*sys.exc_info())
