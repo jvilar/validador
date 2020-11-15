@@ -2,7 +2,7 @@
 '''
 Created on 16/07/2014
 
-@version 1.3.7 (2018-12-05)
+@version 1.3.8 (2020-11-15)
 @author: David Llorens (dllorens@uji.es)
          Federico Prat (fprat@uji.es)
          Juan Miguel Vilar (jvilar@uji.es)
